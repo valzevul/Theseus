@@ -51,7 +51,7 @@ Because some of us watched Apple unveil Liquid Glass at WWDC 2025 and quietly wo
 
 - The iOS 26 Liquid Glass look, running on devices from 2019
 - Metal GPU rendering (with a sensible fallback for ancient hardware)
-- Three drop-in components: TabBar, Slider, Switch, GlassView
+- Four drop-in components: TabBar, Slider, Switch, GlassView
 - Accessibility support out of the box
 - Automatic device adaptation – it won't melt an iPhone 8
 - Spring-based morphing animations
