@@ -7,6 +7,7 @@ class SettingsViewController: UITableViewController {
 
     private enum Section: Int, CaseIterable {
         case deviceInfo
+        case appearance
         case tierOverride
         case iosOverride
         case policyOverride
@@ -28,6 +29,7 @@ class SettingsViewController: UITableViewController {
 
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
         tableView.register(SwitchCell.self, forCellReuseIdentifier: "SwitchCell")
+        tableView.register(SliderCell.self, forCellReuseIdentifier: "SliderCell")
 
         NotificationCenter.default.addObserver(
             self,
@@ -58,6 +60,7 @@ class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
         case .deviceInfo: return 5
+        case .appearance: return 1
         case .tierOverride: return DeviceTier.allCases.count + 1 // +1 for Auto
         case .iosOverride: return 7 // Current + iOS 13-18
         case .policyOverride: return RefractionPolicy.allCases.count + 1
@@ -71,6 +74,7 @@ class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .deviceInfo: return "Device Info"
+        case .appearance: return "Liquid Glass Appearance (iOS 27)"
         case .tierOverride: return "Device Tier Override"
         case .iosOverride: return "iOS Version Simulation"
         case .policyOverride: return "Refraction Policy Override"
@@ -85,6 +89,8 @@ class SettingsViewController: UITableViewController {
         switch Section(rawValue: indexPath.section)! {
         case .deviceInfo:
             return deviceInfoCell(for: indexPath)
+        case .appearance:
+            return appearanceCell(for: indexPath)
         case .tierOverride:
             return tierOverrideCell(for: indexPath)
         case .iosOverride:
@@ -126,6 +132,18 @@ class SettingsViewController: UITableViewController {
 
         cell.textLabel?.font = .systemFont(ofSize: 14)
         cell.textLabel?.textColor = .secondaryLabel
+        return cell
+    }
+
+    private func appearanceCell(for indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "SliderCell", for: indexPath) as! SliderCell
+        cell.configure(
+            minimumLabel: "Clear",
+            maximumLabel: "Tinted",
+            value: Float(settings.tintSpectrum)
+        ) { [weak self] value in
+            self?.settings.tintSpectrum = CGFloat(value)
+        }
         return cell
     }
 
@@ -299,6 +317,62 @@ class SettingsViewController: UITableViewController {
         }
 
         tableView.reloadData()
+    }
+}
+
+// MARK: - Slider Cell
+
+private class SliderCell: UITableViewCell {
+    private let slider = UISlider()
+    private let minimumLabel = UILabel()
+    private let maximumLabel = UILabel()
+    private var onValueChanged: ((Float) -> Void)?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: .default, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+
+        slider.minimumValue = 0
+        slider.maximumValue = 1
+        slider.addTarget(self, action: #selector(sliderChanged), for: .valueChanged)
+
+        minimumLabel.font = .systemFont(ofSize: 13)
+        minimumLabel.textColor = .secondaryLabel
+        maximumLabel.font = .systemFont(ofSize: 13)
+        maximumLabel.textColor = .secondaryLabel
+
+        let stack = UIStackView(arrangedSubviews: [minimumLabel, slider, maximumLabel])
+        stack.axis = .horizontal
+        stack.spacing = 12
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            stack.heightAnchor.constraint(greaterThanOrEqualToConstant: 32)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(minimumLabel: String, maximumLabel: String, value: Float, onValueChanged: @escaping (Float) -> Void) {
+        self.minimumLabel.text = minimumLabel
+        self.maximumLabel.text = maximumLabel
+        // Skip the reload while the user is tracking a slider.
+        if !slider.isTracking {
+            slider.value = value
+        }
+        self.onValueChanged = onValueChanged
+    }
+
+    @objc private func sliderChanged() {
+        onValueChanged?(slider.value)
     }
 }
 

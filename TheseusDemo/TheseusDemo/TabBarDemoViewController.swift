@@ -10,15 +10,13 @@ class TabBarDemoViewController: UIViewController {
     // Default values
     private struct Defaults {
         static let tintColorIndex = 0
-        static let blurRadius: Float = 3.0
-        static let refractionFactor: Float = 1.42
+        static let blurRadius: Float = 2.0
         static let tintColors: [UIColor] = [.systemBlue, .systemPurple, .systemPink, .systemOrange]
     }
 
     // Current settings (for sheet sync)
     private var currentTintIndex = Defaults.tintColorIndex
     private var currentBlurRadius = Defaults.blurRadius
-    private var currentRefractionFactor = Defaults.refractionFactor
 
     private var isDarkMode: Bool {
         get { AppearanceManager.shared.isDarkMode }
@@ -107,8 +105,7 @@ class TabBarDemoViewController: UIViewController {
     @objc private func showSettings() {
         let settingsVC = TabBarSettingsViewController(
             tintIndex: currentTintIndex,
-            blurRadius: currentBlurRadius,
-            refractionFactor: currentRefractionFactor
+            blurRadius: currentBlurRadius
         )
         settingsVC.delegate = self
 
@@ -125,7 +122,6 @@ class TabBarDemoViewController: UIViewController {
     private func applyDefaults() {
         currentTintIndex = Defaults.tintColorIndex
         currentBlurRadius = Defaults.blurRadius
-        currentRefractionFactor = Defaults.refractionFactor
 
         applySettings()
     }
@@ -133,7 +129,6 @@ class TabBarDemoViewController: UIViewController {
     private func applySettings() {
         theseusTabBar.selectedTintColor = Defaults.tintColors[currentTintIndex]
         theseusTabBar.glassBlurRadius = CGFloat(currentBlurRadius)
-        theseusTabBar.glassRefractionFactor = CGFloat(currentRefractionFactor)
         nativeTabBar.tintColor = Defaults.tintColors[currentTintIndex]
     }
 
@@ -166,7 +161,7 @@ class TabBarDemoViewController: UIViewController {
         )
 
         theseusTabBar.items = tabItems.map { item in
-            TheseusTabBarItem(icon: UIImage(systemName: item.0), title: item.1)
+            TheseusTabBarItem(icon: UIImage(systemName: item.0), selectedIcon: UIImage(systemName: item.0 + ".fill") ?? UIImage(systemName: item.0), title: item.1)
         }
         theseusTabBar.selectedIndex = 0
         theseusTabBar.unselectedTintColor = .black
@@ -188,7 +183,7 @@ class TabBarDemoViewController: UIViewController {
             mainStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
 
             nativeTabBar.heightAnchor.constraint(equalToConstant: 49),
-            theseusTabBar.heightAnchor.constraint(equalToConstant: 60)
+            theseusTabBar.heightAnchor.constraint(equalToConstant: 63)
         ])
     }
 
@@ -220,10 +215,9 @@ extension TabBarDemoViewController: UITabBarDelegate {
 // MARK: - Settings Delegate
 
 extension TabBarDemoViewController: TabBarSettingsDelegate {
-    func settingsDidChange(tintIndex: Int, blurRadius: Float, refractionFactor: Float) {
+    func settingsDidChange(tintIndex: Int, blurRadius: Float) {
         currentTintIndex = tintIndex
         currentBlurRadius = blurRadius
-        currentRefractionFactor = refractionFactor
 
         applySettings()
     }
@@ -236,7 +230,7 @@ extension TabBarDemoViewController: TabBarSettingsDelegate {
 // MARK: - Settings View Controller
 
 protocol TabBarSettingsDelegate: AnyObject {
-    func settingsDidChange(tintIndex: Int, blurRadius: Float, refractionFactor: Float)
+    func settingsDidChange(tintIndex: Int, blurRadius: Float)
     func settingsDidReset()
 }
 
@@ -247,17 +241,13 @@ class TabBarSettingsViewController: UIViewController {
     private let tintSegment = UISegmentedControl(items: ["Blue", "Purple", "Pink", "Orange"])
     private let blurSlider = UISlider()
     private let blurValueLabel = UILabel()
-    private let refractionSlider = UISlider()
-    private let refractionValueLabel = UILabel()
 
     private var initialTintIndex: Int
     private var initialBlurRadius: Float
-    private var initialRefractionFactor: Float
 
-    init(tintIndex: Int, blurRadius: Float, refractionFactor: Float) {
+    init(tintIndex: Int, blurRadius: Float) {
         self.initialTintIndex = tintIndex
         self.initialBlurRadius = blurRadius
-        self.initialRefractionFactor = refractionFactor
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -310,17 +300,6 @@ class TabBarSettingsViewController: UIViewController {
         blurSlider.value = initialBlurRadius
         blurSlider.addTarget(self, action: #selector(blurSliderChanged), for: .valueChanged)
         contentStack.addArrangedSubview(createSliderRow(label: blurLabel, valueLabel: blurValueLabel, slider: blurSlider))
-
-        // Refraction Factor
-        let refLabel = createLabel("Refraction Factor")
-        refractionValueLabel.text = String(format: "%.2f", initialRefractionFactor)
-        refractionValueLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        refractionValueLabel.textColor = .secondaryLabel
-        refractionSlider.minimumValue = 0.5
-        refractionSlider.maximumValue = 2.5
-        refractionSlider.value = initialRefractionFactor
-        refractionSlider.addTarget(self, action: #selector(refractionSliderChanged), for: .valueChanged)
-        contentStack.addArrangedSubview(createSliderRow(label: refLabel, valueLabel: refractionValueLabel, slider: refractionSlider))
 
         // Reset Button
         let resetButton = UIButton(type: .system)
@@ -379,25 +358,17 @@ class TabBarSettingsViewController: UIViewController {
         notifyDelegate()
     }
 
-    @objc private func refractionSliderChanged() {
-        refractionValueLabel.text = String(format: "%.2f", refractionSlider.value)
-        notifyDelegate()
-    }
-
     private func notifyDelegate() {
         delegate?.settingsDidChange(
             tintIndex: tintSegment.selectedSegmentIndex,
-            blurRadius: blurSlider.value,
-            refractionFactor: refractionSlider.value
+            blurRadius: blurSlider.value
         )
     }
 
     @objc private func resetToDefaults() {
         tintSegment.selectedSegmentIndex = 0
-        blurSlider.value = 3.0
-        blurValueLabel.text = "3.0"
-        refractionSlider.value = 1.42
-        refractionValueLabel.text = "1.42"
+        blurSlider.value = 2.0
+        blurValueLabel.text = "2.0"
 
         delegate?.settingsDidReset()
     }

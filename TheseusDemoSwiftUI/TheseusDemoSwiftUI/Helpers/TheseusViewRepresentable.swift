@@ -33,22 +33,28 @@ struct TheseusTabBarRepresentable: UIViewRepresentable {
     var selectedTintColor: UIColor
     var unselectedTintColor: UIColor
     var glassBlurRadius: CGFloat
-    var glassRefractionFactor: CGFloat
+    var lensMaterial: TheseusLensMaterial?
+    var onMake: ((TheseusTabBar) -> Void)? = nil
+    var backdropVersion: Int
 
     init(
         items: [TheseusTabBarItem],
         selectedIndex: Binding<Int>,
         selectedTintColor: UIColor = .systemBlue,
-        unselectedTintColor: UIColor = .black,
-        glassBlurRadius: CGFloat = 3.0,
-        glassRefractionFactor: CGFloat = 1.42
+        unselectedTintColor: UIColor = TheseusTabBar.nativeUnselectedTint,
+        glassBlurRadius: CGFloat = 0.0,
+        lensMaterial: TheseusLensMaterial? = nil,
+        backdropVersion: Int = 0,
+        onMake: ((TheseusTabBar) -> Void)? = nil
     ) {
         self.items = items
         self._selectedIndex = selectedIndex
         self.selectedTintColor = selectedTintColor
         self.unselectedTintColor = unselectedTintColor
         self.glassBlurRadius = glassBlurRadius
-        self.glassRefractionFactor = glassRefractionFactor
+        self.lensMaterial = lensMaterial
+        self.backdropVersion = backdropVersion
+        self.onMake = onMake
     }
 
     func makeCoordinator() -> Coordinator {
@@ -57,12 +63,15 @@ struct TheseusTabBarRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TheseusTabBar {
         let tabBar = TheseusTabBar()
+        onMake?(tabBar)
         tabBar.items = items
         tabBar.selectedIndex = selectedIndex
         tabBar.selectedTintColor = selectedTintColor
         tabBar.unselectedTintColor = unselectedTintColor
         tabBar.glassBlurRadius = glassBlurRadius
-        tabBar.glassRefractionFactor = glassRefractionFactor
+        if let lensMaterial = lensMaterial {
+            tabBar.lensMaterial = lensMaterial
+        }
         tabBar.onItemSelected = { index in
             context.coordinator.parent.selectedIndex = index
         }
@@ -70,6 +79,9 @@ struct TheseusTabBarRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TheseusTabBar, context: Context) {
+        if let lensMaterial = lensMaterial, uiView.lensMaterial != lensMaterial {
+            uiView.lensMaterial = lensMaterial
+        }
         // Only update items if count changed to avoid rebuild
         if uiView.items.count != items.count {
             uiView.items = items
@@ -81,13 +93,15 @@ struct TheseusTabBarRepresentable: UIViewRepresentable {
         if uiView.glassBlurRadius != glassBlurRadius {
             uiView.glassBlurRadius = glassBlurRadius
         }
-        if uiView.glassRefractionFactor != glassRefractionFactor {
-            uiView.glassRefractionFactor = glassRefractionFactor
+        if context.coordinator.backdropVersion != backdropVersion {
+            context.coordinator.backdropVersion = backdropVersion
+            uiView.invalidateBackground()
         }
     }
 
     class Coordinator {
         var parent: TheseusTabBarRepresentable
+        var backdropVersion = 0
 
         init(_ parent: TheseusTabBarRepresentable) {
             self.parent = parent
@@ -100,13 +114,13 @@ struct TheseusTabBarRepresentable: UIViewRepresentable {
 struct TheseusSwitchRepresentable: UIViewRepresentable {
     @Binding var isOn: Bool
     var onTintColor: UIColor
-    var offTintColor: UIColor
+    var offTintColor: UIColor?
     var thumbTintColor: UIColor
 
     init(
         isOn: Binding<Bool>,
         onTintColor: UIColor = UIColor(red: 0.259, green: 0.831, blue: 0.318, alpha: 1.0),
-        offTintColor: UIColor = UIColor(white: 0.878, alpha: 1.0),
+        offTintColor: UIColor? = nil,
         thumbTintColor: UIColor = .white
     ) {
         self._isOn = isOn
@@ -123,7 +137,7 @@ struct TheseusSwitchRepresentable: UIViewRepresentable {
         let switchControl = TheseusSwitch()
         switchControl.isOn = isOn
         switchControl.onTintColor = onTintColor
-        switchControl.offTintColor = offTintColor
+        if let offTintColor { switchControl.offTintColor = offTintColor }
         switchControl.thumbTintColor = thumbTintColor
         switchControl.onValueChanged = { newValue in
             context.coordinator.parent.isOn = newValue
@@ -136,7 +150,7 @@ struct TheseusSwitchRepresentable: UIViewRepresentable {
             uiView.setOn(isOn, animated: true)
         }
         uiView.onTintColor = onTintColor
-        uiView.offTintColor = offTintColor
+        if let offTintColor { uiView.offTintColor = offTintColor }
         uiView.thumbTintColor = thumbTintColor
     }
 
@@ -156,7 +170,7 @@ struct TheseusSliderRepresentable: UIViewRepresentable {
     var minimumValue: CGFloat
     var maximumValue: CGFloat
     var trackColor: UIColor
-    var backColor: UIColor
+    var backColor: UIColor?
     var knobColor: UIColor
     var positionsCount: Int
 
@@ -165,7 +179,7 @@ struct TheseusSliderRepresentable: UIViewRepresentable {
         minimumValue: CGFloat = 0,
         maximumValue: CGFloat = 1,
         trackColor: UIColor = UIColor(white: 0.4, alpha: 1.0),
-        backColor: UIColor = UIColor(white: 0.8, alpha: 1.0),
+        backColor: UIColor? = nil,
         knobColor: UIColor = .white,
         positionsCount: Int = 0
     ) {
@@ -188,7 +202,7 @@ struct TheseusSliderRepresentable: UIViewRepresentable {
         slider.maximumValue = maximumValue
         slider.setValue(value)
         slider.trackColor = trackColor
-        slider.backColor = backColor
+        if let backColor { slider.backColor = backColor }
         slider.knobColor = knobColor
         slider.positionsCount = positionsCount
         slider.addTarget(
@@ -206,7 +220,7 @@ struct TheseusSliderRepresentable: UIViewRepresentable {
             uiView.setValue(value)
         }
         uiView.trackColor = trackColor
-        uiView.backColor = backColor
+        if let backColor { uiView.backColor = backColor }
         uiView.knobColor = knobColor
         uiView.positionsCount = positionsCount
     }

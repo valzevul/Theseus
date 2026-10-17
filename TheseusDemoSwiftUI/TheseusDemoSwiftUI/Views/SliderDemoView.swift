@@ -22,7 +22,12 @@ struct SliderDemoView: View {
 
     var body: some View {
         ZStack {
-            GradientBackground(isDarkMode: isDarkMode)
+            if let pattern = UserDefaults.standard.string(forKey: "rigPattern"),
+               pattern.hasPrefix("flat:"), let flat = flatColor(hex: String(pattern.dropFirst(5))) {
+                flat.ignoresSafeArea()
+            } else {
+                GradientBackground(isDarkMode: isDarkMode)
+            }
 
             VStack(spacing: 50) {
                 // Value display
@@ -55,7 +60,7 @@ struct SliderDemoView: View {
                             trackColor: trackColors[trackColorIndex],
                             positionsCount: positionsCount
                         )
-                        .frame(height: 44)
+                        .fixedSize(horizontal: false, vertical: true)
                         .onChange(of: value) { newValue in
                             nativeValue = Double(newValue)
                         }

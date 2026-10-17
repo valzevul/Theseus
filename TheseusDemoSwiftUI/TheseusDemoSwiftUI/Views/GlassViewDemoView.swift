@@ -25,12 +25,13 @@ struct GlassViewDemoView: View {
     @AppStorage("isDarkMode") private var isDarkMode = false
 
     // Settings - tuned for dramatic refraction
-    @State private var blurRadius: Float = 12.0
+    @State private var blurRadius: Float = 2.0
     @State private var cornerRadius: Float = 40.0
     @State private var refractionFactor: Float = 1.8
     @State private var fresnelFactor: Float = 1.4
-    @State private var glareAngle: Float = 135.0
     @State private var continuousUpdate: Bool = false
+    @State private var tintColor: Color = .clear
+    @State private var tintIntensity: Float = 1.0
 
     var body: some View {
         GeometryReader { geometry in
@@ -46,8 +47,9 @@ struct GlassViewDemoView: View {
                     cornerRadius: CGFloat(cornerRadius),
                     refractionFactor: CGFloat(refractionFactor),
                     fresnelFactor: CGFloat(fresnelFactor),
-                    glareAngle: CGFloat(glareAngle),
-                    continuousUpdate: continuousUpdate
+                    continuousUpdate: continuousUpdate,
+                    tintColor: UIColor(tintColor),
+                    tintIntensity: CGFloat(tintIntensity)
                 )
                 .ignoresSafeArea()
             }
@@ -70,8 +72,9 @@ struct GlassViewDemoView: View {
                 cornerRadius: $cornerRadius,
                 refractionFactor: $refractionFactor,
                 fresnelFactor: $fresnelFactor,
-                glareAngle: $glareAngle,
-                continuousUpdate: $continuousUpdate
+                continuousUpdate: $continuousUpdate,
+                tintColor: $tintColor,
+                tintIntensity: $tintIntensity
             )
         }
     }
@@ -107,8 +110,9 @@ struct GlassDemoContainerRepresentable: UIViewRepresentable {
     var cornerRadius: CGFloat
     var refractionFactor: CGFloat
     var fresnelFactor: CGFloat
-    var glareAngle: CGFloat
     var continuousUpdate: Bool
+    var tintColor: UIColor = .clear
+    var tintIntensity: CGFloat = 1.0
 
     func makeUIView(context: Context) -> GlassDemoContainer {
         let container = GlassDemoContainer()
@@ -117,8 +121,9 @@ struct GlassDemoContainerRepresentable: UIViewRepresentable {
             cornerRadius: cornerRadius,
             refractionFactor: refractionFactor,
             fresnelFactor: fresnelFactor,
-            glareAngle: glareAngle,
-            continuousUpdate: continuousUpdate
+            continuousUpdate: continuousUpdate,
+            tintColor: tintColor,
+            tintIntensity: tintIntensity
         )
         return container
     }
@@ -129,8 +134,9 @@ struct GlassDemoContainerRepresentable: UIViewRepresentable {
             cornerRadius: cornerRadius,
             refractionFactor: refractionFactor,
             fresnelFactor: fresnelFactor,
-            glareAngle: glareAngle,
-            continuousUpdate: continuousUpdate
+            continuousUpdate: continuousUpdate,
+            tintColor: tintColor,
+            tintIntensity: tintIntensity
         )
         uiView.updateBackground(isDarkMode: isDarkMode)
     }
@@ -167,12 +173,13 @@ class GlassDemoContainer: UIView {
     private var isDarkMode: Bool = false
 
     // Current settings
-    private var currentBlurRadius: CGFloat = 12.0
+    private var currentBlurRadius: CGFloat = 2.0
     private var currentCornerRadius: CGFloat = 40.0
     private var currentRefractionFactor: CGFloat = 1.8
     private var currentFresnelFactor: CGFloat = 1.4
-    private var currentGlareAngle: CGFloat = 135.0
     private var currentContinuousUpdate: Bool = false
+    private var currentTintColor: UIColor = .clear
+    private var currentTintIntensity: CGFloat = 1.0
 
     // MARK: - Initialization
 
@@ -206,6 +213,11 @@ class GlassDemoContainer: UIView {
             setupBalloonViews()
             startAnimationLoop()
             updateBackground(isDarkMode: isDarkMode)
+            if UserDefaults.standard.bool(forKey: "autodrag") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.startAutoDragDemo()
+                }
+            }
         }
     }
 
@@ -253,15 +265,17 @@ class GlassDemoContainer: UIView {
         cornerRadius: CGFloat,
         refractionFactor: CGFloat,
         fresnelFactor: CGFloat,
-        glareAngle: CGFloat,
-        continuousUpdate: Bool
+        continuousUpdate: Bool,
+        tintColor: UIColor = .clear,
+        tintIntensity: CGFloat = 1.0
     ) {
         currentBlurRadius = blurRadius
         currentCornerRadius = cornerRadius
         currentRefractionFactor = refractionFactor
         currentFresnelFactor = fresnelFactor
-        currentGlareAngle = glareAngle
         currentContinuousUpdate = continuousUpdate
+        currentTintColor = tintColor
+        currentTintIntensity = tintIntensity
 
         applySettings()
     }
@@ -272,8 +286,9 @@ class GlassDemoContainer: UIView {
         theseusView.shape.cornerRadius = currentCornerRadius
         theseusView.refraction.intensity = currentRefractionFactor
         theseusView.edgeEffects.rimGlow = currentFresnelFactor
-        theseusView.edgeEffects.lightAngle = currentGlareAngle * .pi / 180
         theseusView.continuousUpdate = currentContinuousUpdate
+        theseusView.theme.tintColor = currentTintColor
+        theseusView.theme.tintOpacity = currentTintIntensity
 
         // Clear specular colors to prevent white edge artifacts
         theseusView.edgeEffects.nearColor = .clear
@@ -288,9 +303,13 @@ class GlassDemoContainer: UIView {
         var config = TheseusConfiguration()
         config.blur.radius = currentBlurRadius
         config.shape.cornerRadius = lensSize / 2
+        // Near-clear body whatever the global spectrum; 1.35 matches the native lens.
+        config.theme.neutralBodyScale = 0.15
+        config.refraction.magnification = 1.35
         config.refraction.intensity = currentRefractionFactor
-        config.shape.padding = CGPoint(x: 15, y: 15)
-        config.theme.tintColor = .clear
+        // Covers the ring's outward reach at this index (~34 pt at 1.8).
+        config.shape.padding = CGPoint(x: 34, y: 34)
+        config = config.tint(currentTintColor, intensity: currentTintIntensity)
         // Clear specular colors to prevent white edge artifacts
         config.edgeEffects.nearColor = .clear
         config.edgeEffects.farColor = .clear
@@ -409,6 +428,77 @@ class GlassDemoContainer: UIView {
         }
     }
 
+    // MARK: - Scripted Drag (capture_assets.sh)
+
+    // `-autodrag 1` replays the lens pull; the simulator HID stack cannot
+    // emit touch-move events.
+    private var autoDragLink: CADisplayLink?
+    private var autoDragStart: CFTimeInterval = 0
+
+    func startAutoDragDemo() {
+        guard autoDragLink == nil, theseusView != nil else { return }
+        theseusView.continuousUpdate = true
+        balloonViews.forEach { $0.continuousUpdate = true }
+        autoDragStart = CACurrentMediaTime()
+        autoDragLink = CADisplayLink(target: self, selector: #selector(stepAutoDrag))
+        autoDragLink?.add(to: .main, forMode: .common)
+    }
+
+    @objc private func stepAutoDrag() {
+        let t = CACurrentMediaTime() - autoDragStart
+        let topY: CGFloat = 180
+        let bottomY = lensRestingY
+
+        let pullStart = 0.6
+        let pullDuration = 1.8
+        let holdEnd = 4.0
+
+        if t < pullStart {
+            return
+        } else if t < pullStart + pullDuration {
+            let p = (t - pullStart) / pullDuration
+            let eased = 0.5 - 0.5 * cos(p * .pi)
+            let newY = bottomY + (topY - bottomY) * eased
+            dragProgress = max(0, min(1, 1.0 - (newY - topY) / (bottomY - topY)))
+            let scale = 1.0 + dragProgress * 0.6
+            theseusView.transform = CGAffineTransform(scaleX: scale, y: scale)
+            theseusView.center = CGPoint(x: bounds.width / 2, y: newY)
+        } else if t < holdEnd {
+            // Hold at the top; balloons keep springing via the animation loop.
+        } else {
+            autoDragLink?.invalidate()
+            autoDragLink = nil
+            endAutoDrag()
+        }
+    }
+
+    private func endAutoDrag() {
+        // Keep in step with onDragEnded.
+        if dragProgress > 0.2 {
+            releaseBalloons()
+        }
+        UIView.animate(
+            withDuration: 1.0,
+            delay: 0,
+            usingSpringWithDamping: 0.65,
+            initialSpringVelocity: 0.3,
+            options: [.allowUserInteraction]
+        ) {
+            self.theseusView.center = CGPoint(x: self.bounds.width / 2, y: self.lensRestingY)
+            self.theseusView.transform = .identity
+        }
+        animateDragProgressToZero()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self = self else { return }
+            self.theseusView.continuousUpdate = false
+            for (index, balloon) in self.balloonViews.enumerated() {
+                if !self.balloonPhysics[index].isReleased {
+                    balloon.continuousUpdate = false
+                }
+            }
+        }
+    }
+
     private func animateDragProgressToZero() {
         let startProgress = dragProgress
         let duration: Double = 1.0
@@ -455,8 +545,10 @@ class GlassDemoContainer: UIView {
             balloonConfig.shape.cornerRadius = config.size / 2
             balloonConfig.blur.radius = 10
             balloonConfig.refraction.intensity = 1.6
+            balloonConfig.theme.neutralBodyScale = 0.15
             balloonConfig.theme.tintColor = .clear
-            balloonConfig.shape.padding = CGPoint(x: 10, y: 10)
+            // Covers the ring's outward reach at this index (~28 pt).
+            balloonConfig.shape.padding = CGPoint(x: 28, y: 28)
             // Clear specular colors to prevent white edge artifacts
             balloonConfig.edgeEffects.nearColor = .clear
             balloonConfig.edgeEffects.farColor = .clear
@@ -609,7 +701,7 @@ class GlassDemoContainer: UIView {
         let handler = TheseusGestureDeformer(targetView: balloon)
 
         handler.positionProvider = { [weak self] translation, currentCenter, bounds in
-            guard let self = self else { return nil }
+            guard self != nil else { return nil }
 
             var newCenter = CGPoint(
                 x: currentCenter.x + translation.x,
@@ -672,8 +764,9 @@ struct GlassViewSettingsSheet: View {
     @Binding var cornerRadius: Float
     @Binding var refractionFactor: Float
     @Binding var fresnelFactor: Float
-    @Binding var glareAngle: Float
     @Binding var continuousUpdate: Bool
+    @Binding var tintColor: Color
+    @Binding var tintIntensity: Float
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
@@ -695,8 +788,16 @@ struct GlassViewSettingsSheet: View {
                     Slider(value: $fresnelFactor, in: 0...2)
                 }
 
-                Section("Glare Angle: \(String(format: "%.0f", glareAngle))") {
-                    Slider(value: $glareAngle, in: 0...360)
+                Section {
+                    ColorPicker("Tint Color", selection: $tintColor, supportsOpacity: true)
+                    VStack(alignment: .leading) {
+                        Text("Intensity: \(String(format: "%.2f", tintIntensity))")
+                        Slider(value: $tintIntensity, in: 0...1)
+                    }
+                } header: {
+                    Text("Glass Tint")
+                } footer: {
+                    Text("Mirrors glassEffect(.regular.tint(...)). The global Clear to Tinted spectrum in Settings fades it out toward the clear end.")
                 }
 
                 Section {
@@ -709,8 +810,9 @@ struct GlassViewSettingsSheet: View {
                         cornerRadius = 40.0
                         refractionFactor = 1.8
                         fresnelFactor = 1.4
-                        glareAngle = 135.0
                         continuousUpdate = false
+                        tintColor = .clear
+                        tintIntensity = 1.0
                     }
                 }
             }

@@ -3,10 +3,22 @@ import SwiftUI
 struct ContentView: View {
     @AppStorage("isDarkMode") private var isDarkMode = false
 
+    // `-demo <tag>` deep-routes into a screen. Set from onAppear after a delay:
+    // setting it before the NavigationView attaches fails silently on iOS 15/16.
+    @State private var demoSelection: String?
+
     var body: some View {
         NavigationView {
             List {
-                NavigationLink(destination: TabBarDemoView()) {
+                NavigationLink(destination: Glass27DemoView(), tag: "glass27", selection: $demoSelection) {
+                    DemoRow(
+                        icon: "sparkles",
+                        title: "iOS 27 Glass",
+                        description: "Tint, spectrum, shape merging, dimming"
+                    )
+                }
+
+                NavigationLink(destination: TabBarDemoView(), tag: "tabbar", selection: $demoSelection) {
                     DemoRow(
                         icon: "rectangle.split.3x1",
                         title: "Tab Bar",
@@ -14,7 +26,15 @@ struct ContentView: View {
                     )
                 }
 
-                NavigationLink(destination: SwitchDemoView()) {
+                NavigationLink(destination: LensLabView(), tag: "lenslab", selection: $demoSelection) {
+                    DemoRow(
+                        icon: "slider.horizontal.3",
+                        title: "Lens Lab",
+                        description: "Tune the drag lens live against the native bar"
+                    )
+                }
+
+                NavigationLink(destination: SwitchDemoView(), tag: "switch", selection: $demoSelection) {
                     DemoRow(
                         icon: "switch.2",
                         title: "Switch",
@@ -22,7 +42,7 @@ struct ContentView: View {
                     )
                 }
 
-                NavigationLink(destination: SliderDemoView()) {
+                NavigationLink(destination: SliderDemoView(), tag: "slider", selection: $demoSelection) {
                     DemoRow(
                         icon: "slider.horizontal.3",
                         title: "Slider",
@@ -30,7 +50,7 @@ struct ContentView: View {
                     )
                 }
 
-                NavigationLink(destination: GlassViewDemoView()) {
+                NavigationLink(destination: GlassViewDemoView(), tag: "glassview", selection: $demoSelection) {
                     DemoRow(
                         icon: "rectangle.on.rectangle",
                         title: "Glass View",
@@ -38,7 +58,7 @@ struct ContentView: View {
                     )
                 }
 
-                NavigationLink(destination: SettingsView()) {
+                NavigationLink(destination: SettingsView(), tag: "settings", selection: $demoSelection) {
                     DemoRow(
                         icon: "gearshape.fill",
                         title: "Settings",
@@ -57,6 +77,13 @@ struct ContentView: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(isDarkMode ? .dark : .light)
+        .onAppear {
+            guard let target = UserDefaults.standard.string(forKey: "demo"),
+                  demoSelection == nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                demoSelection = target
+            }
+        }
     }
 }
 

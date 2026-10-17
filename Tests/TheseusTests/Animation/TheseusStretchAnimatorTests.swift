@@ -3,6 +3,16 @@ import XCTest
 
 final class TheseusStretchAnimatorTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        TheseusSettings.shared.simulateReduceMotion = false
+    }
+
+    override func tearDown() {
+        TheseusSettings.shared.simulateReduceMotion = nil
+        super.tearDown()
+    }
+
     // MARK: - Configuration
 
     func testDefaultConfiguration() {

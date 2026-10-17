@@ -1,9 +1,9 @@
 # Xcode
 build/
 DerivedData/
-*.xcodeproj/xcuserdata/
-*.xcworkspace/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Xcode playgrounds
 timeline.xctimeline
@@ -82,3 +82,6 @@ Pods/
 
 # Local
 local.properties
+
+# Scratch reference screenshots
+TheseusDemoSwiftUI/tmp/

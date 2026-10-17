@@ -39,6 +39,13 @@ final class TheseusSettingsTests: XCTestCase {
         XCTAssertEqual(settings.effectiveIOSVersion, TheseusCapability.iosMajorVersion)
     }
 
+    func testIOSMajorVersionMatchesProcessInfo() {
+        let expected = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        XCTAssertEqual(TheseusCapability.iosMajorVersion, expected)
+        settings.iosVersionOverride = nil
+        XCTAssertEqual(settings.effectiveIOSVersion, expected)
+    }
+
     // MARK: - Refraction Policy Override
 
     func testRefractionPolicyOverrideApplied() {
@@ -241,6 +248,168 @@ final class TheseusSettingsTests: XCTestCase {
         XCTAssertNil(settings.simulateLowPowerMode)
         XCTAssertNil(settings.simulateReduceTransparency)
         XCTAssertNil(settings.simulateReduceMotion)
+    }
+
+    // MARK: - Tint Spectrum (iOS 27 clear to tinted parity)
+
+    func testTintSpectrumDefaultsToSystemMidpoint() {
+        // Matches iOS 27's "Tint Amount" system default of 0.5
+        XCTAssertEqual(settings.tintSpectrum, 0.5)
+    }
+
+    func testSystemTintFollowsTheTintAmountOnIOS27() {
+        UserDefaults.standard.set(0.25, forKey: TheseusSettings.systemTintAmountKey)
+        defer { UserDefaults.standard.removeObject(forKey: TheseusSettings.systemTintAmountKey) }
+        settings.iosVersionOverride = 27
+        XCTAssertEqual(settings.systemTintSpectrum ?? -1, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(settings.tintSpectrum, 0.25, accuracy: 0.0001)
+        UserDefaults.standard.removeObject(forKey: TheseusSettings.systemTintAmountKey)
+        XCTAssertEqual(settings.systemTintSpectrum ?? -1, 0.5, accuracy: 0.0001)
+    }
+
+    func testSystemTintReadsClearOrTintedOnIOS26() {
+        UserDefaults.standard.set(1, forKey: TheseusSettings.systemGlassLegibilityKey)
+        defer { UserDefaults.standard.removeObject(forKey: TheseusSettings.systemGlassLegibilityKey) }
+        settings.iosVersionOverride = 26
+        XCTAssertEqual(settings.systemTintSpectrum, 1)
+        XCTAssertEqual(settings.tintSpectrum, 1)
+        XCTAssertEqual(settings.effectiveGlassStyle, .iOS26)
+        settings.iosVersionOverride = 25
+        XCTAssertNil(settings.systemTintSpectrum)
+        XCTAssertEqual(settings.effectiveGlassStyle, .iOS27)
+    }
+
+    func testSettingTheSpectrumStopsFollowingTheSystem() {
+        XCTAssertTrue(settings.followsSystemTint)
+        settings.tintSpectrum = 0.8
+        XCTAssertFalse(settings.followsSystemTint)
+        UserDefaults.standard.set(0.1, forKey: TheseusSettings.systemTintAmountKey)
+        defer { UserDefaults.standard.removeObject(forKey: TheseusSettings.systemTintAmountKey) }
+        settings.iosVersionOverride = 27
+        XCTAssertEqual(settings.tintSpectrum, 0.8, accuracy: 0.0001)
+        settings.followsSystemTint = true
+        XCTAssertEqual(settings.tintSpectrum, 0.1, accuracy: 0.0001)
+    }
+
+    func testTintSpectrumClampsToUnitRange() {
+        settings.tintSpectrum = 1.5
+        XCTAssertEqual(settings.tintSpectrum, 1.0)
+
+        settings.tintSpectrum = -0.5
+        XCTAssertEqual(settings.tintSpectrum, 0.0)
+
+        settings.tintSpectrum = 0.42
+        XCTAssertEqual(settings.tintSpectrum, 0.42)
+    }
+
+    func testTintSpectrumPostsNotification() {
+        let expectation = expectation(description: "Tint spectrum change notification")
+
+        let observer = NotificationCenter.default.addObserver(
+            forName: TheseusSettings.settingsDidChangeNotification,
+            object: settings,
+            queue: nil
+        ) { _ in
+            expectation.fulfill()
+        }
+
+        settings.tintSpectrum = 0.3
+
+        waitForExpectations(timeout: 1.0)
+        NotificationCenter.default.removeObserver(observer)
+    }
+
+    func testTintSpectrumResetsToDefault() {
+        settings.tintSpectrum = 0.2
+        settings.resetToDefaults()
+        XCTAssertEqual(settings.tintSpectrum, 0.5)
+    }
+
+    func testTintSpectrumPersistenceWritesAndLoads() {
+        let suiteName = "TheseusSettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create test defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        settings.tintSpectrum = 0.75
+        settings.enableTintSpectrumPersistence(in: defaults)
+        XCTAssertEqual(defaults.double(forKey: TheseusSettings.tintSpectrumDefaultsKey), 0.75, accuracy: 0.0001)
+
+        settings.tintSpectrum = 0.25
+        XCTAssertEqual(defaults.double(forKey: TheseusSettings.tintSpectrumDefaultsKey), 0.25, accuracy: 0.0001)
+
+        settings.disableTintSpectrumPersistence()
+    }
+
+    func testTintSpectrumPersistenceLoadsStoredValueOnEnable() {
+        let suiteName = "TheseusSettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create test defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(0.6, forKey: TheseusSettings.tintSpectrumDefaultsKey)
+        settings.enableTintSpectrumPersistence(in: defaults)
+        XCTAssertEqual(settings.tintSpectrum, 0.6, accuracy: 0.0001)
+
+        settings.disableTintSpectrumPersistence()
+    }
+
+    func testTintSpectrumPersistenceWithCustomKey() {
+        let suiteName = "TheseusSettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create test defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        settings.tintSpectrum = 0.9
+        settings.enableTintSpectrumPersistence(in: defaults, key: "CustomTintKey")
+        XCTAssertEqual(defaults.double(forKey: "CustomTintKey"), 0.9, accuracy: 0.0001)
+
+        settings.disableTintSpectrumPersistence()
+    }
+
+    func testTintSpectrumPersistenceObservesSecondDefaultsInstance() {
+        let suiteName = "TheseusSettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let otherInstance = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create test defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        settings.tintSpectrum = 0.5
+        settings.enableTintSpectrumPersistence(in: defaults)
+
+        let updated = expectation(
+            forNotification: TheseusSettings.settingsDidChangeNotification,
+            object: settings
+        ) { _ in
+            TheseusSettings.shared.tintSpectrum == 0.15
+        }
+
+        otherInstance.set(0.15, forKey: TheseusSettings.tintSpectrumDefaultsKey)
+
+        wait(for: [updated], timeout: 5.0)
+        XCTAssertEqual(settings.tintSpectrum, 0.15, accuracy: 0.0001)
+
+        settings.disableTintSpectrumPersistence()
+    }
+
+    func testDisablingPersistenceKeepsInMemoryValue() {
+        let suiteName = "TheseusSettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create test defaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        settings.enableTintSpectrumPersistence(in: defaults)
+        settings.tintSpectrum = 0.5
+        settings.disableTintSpectrumPersistence()
+
+        settings.tintSpectrum = 0.1
+        XCTAssertEqual(settings.tintSpectrum, 0.1)
+        XCTAssertEqual(defaults.double(forKey: TheseusSettings.tintSpectrumDefaultsKey), 0.5, accuracy: 0.0001)
     }
 
     // MARK: - Notification

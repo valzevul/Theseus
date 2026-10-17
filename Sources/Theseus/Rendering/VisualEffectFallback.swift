@@ -1,50 +1,49 @@
 import UIKit
 
-/// Fallback glass rendering using UIVisualEffectView for devices without Metal
-/// or when using cheapApprox refraction policy
+/// Glass built from UIVisualEffectView, used when Metal refraction is unavailable or turned off.
 public final class VisualEffectFallbackView: UIView {
 
     // MARK: - Public Properties
 
-    /// Corner radius of the glass effect
     public var cornerRadius: CGFloat = 16 {
         didSet {
             layer.cornerRadius = cornerRadius
             blurView.layer.cornerRadius = cornerRadius
+            bodyOverlay.layer.cornerRadius = cornerRadius
+            tintOverlay.layer.cornerRadius = cornerRadius
+            liftOverlay.layer.cornerRadius = cornerRadius
             rimLayer.cornerRadius = cornerRadius
+            shadingLayer.cornerRadius = cornerRadius
             updateRimPath()
         }
     }
 
-    /// Tint color for the glass
     public var glassTintColor: UIColor = UIColor(white: 1.0, alpha: 0.1) {
         didSet {
-            tintOverlay.backgroundColor = glassTintColor
+            applyTintColor()
         }
     }
 
-    /// Shadow opacity
     public var shadowOpacity: Float = 0.15 {
         didSet {
             layer.shadowOpacity = shadowOpacity
         }
     }
 
-    /// Shadow radius
     public var shadowRadius: CGFloat = 12 {
         didSet {
             layer.shadowRadius = shadowRadius
         }
     }
 
-    /// Rim highlight intensity (0-1)
+    /// Range 0...1.
     public var rimIntensity: CGFloat = 0.6 {
         didSet {
             updateRimGradient()
         }
     }
 
-    /// Inner shadow intensity (0-1)
+    /// Range 0...1.
     public var innerShadowIntensity: CGFloat = 0.3 {
         didSet {
             updateInnerShadow()
@@ -54,7 +53,10 @@ public final class VisualEffectFallbackView: UIView {
     // MARK: - Private Views
 
     private let blurView: UIVisualEffectView
+    private let bodyOverlay = UIView()
     private let tintOverlay = UIView()
+    private let liftOverlay = UIView()
+    private let shadingLayer = CAGradientLayer()
     private let rimLayer = CAGradientLayer()
     private let rimMaskLayer = CAShapeLayer()
     private let innerShadowLayer = CALayer()
@@ -62,9 +64,12 @@ public final class VisualEffectFallbackView: UIView {
 
     // MARK: - Initialization
 
+    private static func thinBlurStyle(isDark: Bool = false) -> UIBlurEffect.Style {
+        isDark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight
+    }
+
     public init() {
-        // Use a light blur for glass effect
-        let blurEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        let blurEffect = UIBlurEffect(style: Self.thinBlurStyle())
         blurView = UIVisualEffectView(effect: blurEffect)
 
         super.init(frame: .zero)
@@ -72,7 +77,7 @@ public final class VisualEffectFallbackView: UIView {
     }
 
     public required init?(coder: NSCoder) {
-        let blurEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        let blurEffect = UIBlurEffect(style: Self.thinBlurStyle())
         blurView = UIVisualEffectView(effect: blurEffect)
 
         super.init(coder: coder)
@@ -85,25 +90,46 @@ public final class VisualEffectFallbackView: UIView {
         clipsToBounds = false
         layer.masksToBounds = false
 
-        // Shadow
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = shadowOpacity
         layer.shadowRadius = shadowRadius
         layer.shadowOffset = CGSize(width: 0, height: 4)
 
-        // Blur background - reduce alpha for transparency
         blurView.clipsToBounds = true
         blurView.layer.cornerRadius = cornerRadius
-        blurView.alpha = 0.7  // More transparent by default
+        blurView.alpha = 0.7
         addSubview(blurView)
 
-        // Tint overlay
+        bodyOverlay.backgroundColor = .white
+        bodyOverlay.clipsToBounds = true
+        bodyOverlay.layer.cornerRadius = cornerRadius
+        bodyOverlay.alpha = 0
+        addSubview(bodyOverlay)
+
+        liftOverlay.backgroundColor = .white
+        liftOverlay.clipsToBounds = true
+        liftOverlay.layer.cornerRadius = cornerRadius
+        liftOverlay.layer.compositingFilter = "linearDodgeBlendMode"
+        liftOverlay.alpha = 0
+        addSubview(liftOverlay)
+
         tintOverlay.backgroundColor = glassTintColor
         tintOverlay.clipsToBounds = true
         tintOverlay.layer.cornerRadius = cornerRadius
         addSubview(tintOverlay)
 
-        // Rim highlight (gradient stroke)
+        // compositingFilter is public CALayer API, not the private CAFilter class.
+        shadingLayer.colors = [
+            UIColor.white.cgColor,
+            UIColor(white: 0.86, alpha: 1.0).cgColor
+        ]
+        shadingLayer.startPoint = CGPoint(x: 0.5, y: 0)
+        shadingLayer.endPoint = CGPoint(x: 0.5, y: 1)
+        shadingLayer.compositingFilter = "multiplyBlendMode"
+        shadingLayer.cornerRadius = cornerRadius
+        shadingLayer.masksToBounds = true
+        layer.addSublayer(shadingLayer)
+
         rimLayer.type = .conic
         rimLayer.startPoint = CGPoint(x: 0.5, y: 0)
         rimLayer.endPoint = CGPoint(x: 0.5, y: 1)
@@ -113,7 +139,6 @@ public final class VisualEffectFallbackView: UIView {
         rimLayer.mask = rimMaskLayer
         layer.addSublayer(rimLayer)
 
-        // Inner shadow
         innerShadowLayer.shadowColor = UIColor.black.cgColor
         innerShadowLayer.shadowOpacity = Float(innerShadowIntensity)
         innerShadowLayer.shadowRadius = 6
@@ -131,7 +156,10 @@ public final class VisualEffectFallbackView: UIView {
         super.layoutSubviews()
 
         blurView.frame = bounds
+        bodyOverlay.frame = bounds
         tintOverlay.frame = bounds
+        liftOverlay.frame = bounds
+        shadingLayer.frame = bounds
         rimLayer.frame = bounds
         innerShadowLayer.frame = bounds
 
@@ -164,7 +192,6 @@ public final class VisualEffectFallbackView: UIView {
     }
 
     private func updateInnerShadow() {
-        // Create an inner shadow by using a larger outer path and the view bounds as cutout
         let outerRect = bounds.insetBy(dx: -20, dy: -20)
         let outerPath = UIBezierPath(rect: outerRect)
         let innerPath = UIBezierPath(roundedRect: bounds, cornerRadius: cornerRadius)
@@ -177,28 +204,98 @@ public final class VisualEffectFallbackView: UIView {
 
     // MARK: - Public Methods
 
-    /// Update blur style based on trait collection
     public func updateForTraitCollection(_ traitCollection: UITraitCollection) {
-        let style: UIBlurEffect.Style
-        if traitCollection.userInterfaceStyle == .dark {
-            style = .systemUltraThinMaterialDark
-        } else {
-            style = .systemUltraThinMaterialLight
-        }
-        blurView.effect = UIBlurEffect(style: style)
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        blurView.effect = UIBlurEffect(style: Self.thinBlurStyle(isDark: isDark))
     }
 
-    /// Configure from TheseusConfiguration
-    public func configure(with config: TheseusConfiguration) {
-        cornerRadius = config.shape.cornerRadius
-        glassTintColor = config.theme.tintColor.withAlphaComponent(0.05)
+    private var lastConfiguration: TheseusConfiguration?
 
-        // Apply opacity - keep blur subtle for see-through effect
+    public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle else { return }
+        updateForTraitCollection(traitCollection)
+        if let config = lastConfiguration {
+            configure(with: config)
+        }
+    }
+
+    /// Fallback analogue of the Metal backend's surface tint factor.
+    private static let fallbackTintFactor: CGFloat = 0.5
+
+    private static let shadingFactor: CGFloat = 0.6
+
+    /// The blur already gives this backend some body, so the overlay stays subtle.
+    private static let fallbackNeutralBodyScale: CGFloat = 0.34
+
+    public func configure(with config: TheseusConfiguration) {
+        lastConfiguration = config
+        cornerRadius = config.shape.cornerRadius
+
+        let spectrum = min(max(TheseusSettings.shared.tintSpectrum, 0.0), 1.0)
         let opacity = config.opacity
-        blurView.alpha = opacity * 0.6  // Reduced for transparency
-        tintOverlay.alpha = opacity * 0.15
+
+        var tintAlpha: CGFloat = 0
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+        config.theme.tintColor.getRed(&r, green: &g, blue: &b, alpha: &tintAlpha)
+
+        // Branch on colour alpha x intensity, as the Metal backend does: zero
+        // intensity falls back to the neutral body, not to a third state.
+        tintAlpha *= min(max(config.theme.tintOpacity, 0.0), 1.0)
+
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        let veil = TheseusMaterialModel.veilColor(
+            configuration: config,
+            isDark: isDark,
+            spectrum: spectrum,
+            backdropLuminance: isDark ? 0.2 : 0.85
+        )
+        var veilWhite: CGFloat = 0, veilAlpha: CGFloat = 0
+        veil.getWhite(&veilWhite, alpha: &veilAlpha)
+        bodyOverlay.backgroundColor = UIColor(white: veilWhite, alpha: 1)
+        bodyOverlay.alpha = min(opacity * veilAlpha * Self.fallbackNeutralBodyScale, 1.0)
+        liftOverlay.alpha = 0
+
+        if tintAlpha <= 0.001 {
+            glassTintColor = .clear
+            tintOverlay.alpha = 0
+        } else {
+            let intensity = min(max(config.theme.tintOpacity, 0.0), 1.0)
+            let body = TheseusMaterialModel.bodyValue(isDark ? 0.2 : 0.85, configuration: config, isDark: isDark, spectrum: spectrum)
+            let target = TheseusMaterialModel.tinted([r, g, b], alpha: 1, body: [body, body, body], model: TheseusMaterialModel.tintModel(isDark: isDark))
+            glassTintColor = UIColor(red: target[0], green: target[1], blue: target[2], alpha: 1)
+            tintOverlay.alpha = opacity * intensity * Self.fallbackTintFactor
+        }
+
+        shadingLayer.opacity = Float(opacity * Self.shadingFactor)
         rimLayer.opacity = Float(opacity * 0.8)
         innerShadowLayer.opacity = Float(opacity * 0.3)
+    }
+
+    // MARK: - Tint Dimming
+
+    /// Desaturates the tint while a sheet dims the presenting hierarchy.
+    public override func tintColorDidChange() {
+        super.tintColorDidChange()
+        applyTintColor()
+    }
+
+    private func applyTintColor() {
+        if tintAdjustmentMode == .dimmed {
+            tintOverlay.backgroundColor = glassTintColor.theseusDesaturated()
+        } else {
+            tintOverlay.backgroundColor = glassTintColor
+        }
+    }
+}
+
+private extension UIColor {
+    /// Rec. 601 luminance, matching UIKit's dimmed tint colours.
+    func theseusDesaturated() -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return self }
+        let gray = 0.299 * r + 0.587 * g + 0.114 * b
+        return UIColor(white: gray, alpha: a)
     }
 }
 
@@ -206,21 +303,17 @@ public final class VisualEffectFallbackView: UIView {
 
 extension VisualEffectFallbackView {
 
-    /// Whether fallback should be used based on current settings
     public static var shouldUseFallback: Bool {
         let settings = TheseusSettings.shared
 
-        // Use fallback if refraction policy is off or cheapApprox
         if settings.effectiveRefractionPolicy != .trueRefraction {
             return true
         }
 
-        // Use fallback if Metal is not available
         if !TheseusCapability.isMetalAvailable {
             return true
         }
 
-        // Use fallback for tier0 devices
         if settings.effectiveTier == .tier0 {
             return true
         }

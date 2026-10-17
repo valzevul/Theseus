@@ -1,7 +1,6 @@
 import Metal
 import UIKit
 
-/// Singleton Metal context managing device, command queue, and pipeline states
 final class MetalContext {
 
     static let shared: MetalContext? = {
@@ -18,17 +17,24 @@ final class MetalContext {
 
     private(set) var horizontalBlurPipelineState: MTLRenderPipelineState!
     private(set) var verticalBlurPipelineState: MTLRenderPipelineState!
-    private(set) var compositePipelineState: MTLRenderPipelineState!
     private(set) var refractionCompositePipelineState: MTLRenderPipelineState!
-    private(set) var innerShadowPipelineState: MTLRenderPipelineState!
 
     private(set) var quadVertexBuffer: MTLBuffer!
 
     let recommendedQuality: QualityLevel
 
-    let sharedEvent: MTLSharedEvent
     let eventListener: MTLSharedEventListener
     private let eventNotificationQueue: DispatchQueue
+
+    static func prewarm() {
+        _ = prewarmOnce
+    }
+
+    private static let prewarmOnce: Void = {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = MetalContext.shared
+        }
+    }()
 
     private init?(device: MTLDevice) {
         self.device = device
@@ -38,7 +44,6 @@ final class MetalContext {
         }
         self.commandQueue = commandQueue
 
-        // Find the shader bundle within the SPM module bundle
         guard let library = MetalContext.loadMetalLibrary(device: device) else {
             print("MetalContext: cannot load Metal library")
             return nil
@@ -46,12 +51,6 @@ final class MetalContext {
         self.library = library
 
         self.recommendedQuality = Self.detectQualityLevel(device: device)
-
-        guard let sharedEvent = device.makeSharedEvent() else {
-            print("MetalContext: cannot makeSharedEvent")
-            return nil
-        }
-        self.sharedEvent = sharedEvent
 
         self.eventNotificationQueue = DispatchQueue(
             label: "com.theseus.sync",
@@ -71,10 +70,8 @@ final class MetalContext {
     }
 
     private static func loadMetalLibrary(device: MTLDevice) -> MTLLibrary? {
-        // Try to load from SPM module bundle first
         let bundle = Bundle.module
 
-        // Look for default.metallib in the bundle
         if let libraryURL = bundle.url(forResource: "default", withExtension: "metallib") {
             do {
                 return try device.makeLibrary(URL: libraryURL)
@@ -83,14 +80,12 @@ final class MetalContext {
             }
         }
 
-        // Try to make library from bundle directly
         do {
             return try device.makeDefaultLibrary(bundle: bundle)
         } catch {
             print("MetalContext: Failed to make default library from bundle: \(error)")
         }
 
-        // Fallback: try to find the metallib in the resources
         if let resourcePath = bundle.resourcePath {
             let fileManager = FileManager.default
             if let enumerator = fileManager.enumerator(atPath: resourcePath) {
@@ -114,7 +109,6 @@ final class MetalContext {
         let vertexFunction = library.makeFunction(name: "vertexPassthrough")
         let horizontalBlurFunction = library.makeFunction(name: "gaussianBlurHorizontal")
         let verticalBlurFunction = library.makeFunction(name: "gaussianBlurVertical")
-        let compositeFunction = library.makeFunction(name: "blendPassFragment")
 
         let blurPipelineDescriptor = MTLRenderPipelineDescriptor()
         blurPipelineDescriptor.vertexFunction = vertexFunction
@@ -126,20 +120,6 @@ final class MetalContext {
         blurPipelineDescriptor.fragmentFunction = verticalBlurFunction
         verticalBlurPipelineState = try device.makeRenderPipelineState(descriptor: blurPipelineDescriptor)
 
-        let compositePipelineDescriptor = MTLRenderPipelineDescriptor()
-        compositePipelineDescriptor.vertexFunction = vertexFunction
-        compositePipelineDescriptor.fragmentFunction = compositeFunction
-        compositePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        compositePipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
-        compositePipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
-        compositePipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
-        compositePipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        compositePipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-        compositePipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        compositePipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-
-        compositePipelineState = try device.makeRenderPipelineState(descriptor: compositePipelineDescriptor)
-
         let refractionCompositeFunction = library.makeFunction(name: "glassRenderFragment")
 
         let refractionPipelineDescriptor = MTLRenderPipelineDescriptor()
@@ -150,29 +130,21 @@ final class MetalContext {
         refractionPipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
         refractionPipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
         refractionPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        refractionPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+        // Alpha accumulates as coverage (a, not a^2): with .sourceAlpha the drawable's
+        // alpha understates coverage and Core Animation adds background on top.
+        refractionPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
         refractionPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
         refractionPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
         refractionCompositePipelineState = try device.makeRenderPipelineState(descriptor: refractionPipelineDescriptor)
-
-        let innerShadowFunction = library.makeFunction(name: "shadowPassFragment")
-
-        let innerShadowDescriptor = MTLRenderPipelineDescriptor()
-        innerShadowDescriptor.vertexFunction = vertexFunction
-        innerShadowDescriptor.fragmentFunction = innerShadowFunction
-        innerShadowDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        innerShadowDescriptor.colorAttachments[0].isBlendingEnabled = false
-
-        innerShadowPipelineState = try device.makeRenderPipelineState(descriptor: innerShadowDescriptor)
     }
 
     private func setupQuadVertexBuffer() {
         let vertices: [QuadVertex] = [
-            QuadVertex(position: SIMD2<Float>(-1, -1), texCoord: SIMD2<Float>(0, 1)), // bottom-left
-            QuadVertex(position: SIMD2<Float>( 1, -1), texCoord: SIMD2<Float>(1, 1)), // bottom-right
-            QuadVertex(position: SIMD2<Float>(-1,  1), texCoord: SIMD2<Float>(0, 0)), // top-left
-            QuadVertex(position: SIMD2<Float>( 1,  1), texCoord: SIMD2<Float>(1, 0)), // top-right
+            QuadVertex(position: SIMD2<Float>(-1, -1), texCoord: SIMD2<Float>(0, 1)),
+            QuadVertex(position: SIMD2<Float>( 1, -1), texCoord: SIMD2<Float>(1, 1)),
+            QuadVertex(position: SIMD2<Float>(-1,  1), texCoord: SIMD2<Float>(0, 0)),
+            QuadVertex(position: SIMD2<Float>( 1,  1), texCoord: SIMD2<Float>(1, 0)),
         ]
 
         quadVertexBuffer = device.makeBuffer(
@@ -192,7 +164,6 @@ final class MetalContext {
         } else if device.supportsFamily(.apple3) {
             return .medium // A9/A10 (iPhone 6s/7)
         }
-        // Fallback for unknown GPU families (e.g., future devices or simulators)
         return .high
     }
 }

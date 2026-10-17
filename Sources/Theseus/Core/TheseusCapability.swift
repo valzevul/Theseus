@@ -94,6 +94,7 @@ public enum TheseusCapability {
         ProcessInfo.processInfo.processorCount
     }
 
+    @available(*, deprecated, message: "Unused; compose from deviceTier, physicalMemoryGB and processorCount.")
     public static var deviceInfoString: String {
         let tier = deviceTier
         let memoryGB = physicalMemoryGB
@@ -102,12 +103,7 @@ public enum TheseusCapability {
     }
 
     public static var iosMajorVersion: Int {
-        if #available(iOS 18, *) { return 18 }
-        if #available(iOS 17, *) { return 17 }
-        if #available(iOS 16, *) { return 16 }
-        if #available(iOS 15, *) { return 15 }
-        if #available(iOS 14, *) { return 14 }
-        return 13
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     }
 
     public static var iosVersionString: String {
@@ -115,6 +111,7 @@ public enum TheseusCapability {
         return "\(version.majorVersion).\(version.minorVersion)"
     }
 
+    @available(*, deprecated, message: "Unused; use TheseusSettings.shared.effectiveRefractionPolicy.")
     public static var recommendedRefractionPolicy: RefractionPolicy {
         let env = TheseusEnvironment.shared
 
@@ -140,6 +137,7 @@ public enum TheseusCapability {
         }
     }
 
+    @available(*, deprecated, message: "Unused; use TheseusSettings.shared.effectiveRefractionQuality.")
     public static var recommendedRefractionQuality: RefractionQuality {
         let env = TheseusEnvironment.shared
 
@@ -159,6 +157,7 @@ public enum TheseusCapability {
         }
     }
 
+    @available(*, deprecated, message: "Unused; use TheseusSettings.shared.effectivePolicy(for:).")
     public static func recommendedPolicy(for component: ComponentType) -> RefractionPolicy {
         let basePolicy = recommendedRefractionPolicy
 
@@ -188,6 +187,7 @@ public enum TheseusCapability {
         case glassView
     }
 
+    @available(*, deprecated, message: "Unused; compose from TheseusSettings.shared.effectiveRefractionPolicy and effectiveRefractionQuality.")
     public static var policyInfoString: String {
         let policy = recommendedRefractionPolicy
         let quality = recommendedRefractionQuality
@@ -232,7 +232,9 @@ public enum TheseusCapability {
         return .high
     }
 
-    private static func isUnsupportedDevice(identifier: String) -> Bool {
+    static func isUnsupportedDevice(identifier: String) -> Bool {
+        // The trailing comma is load-bearing: "iPhone1," must not match
+        // "iPhone10,x" to "iPhone19,x".
         let unsupportedPrefixes = [
             "iPod1,", "iPod2,", "iPod3,", "iPod4,", "iPod5,", "iPod7,", "iPod9,",
             "iPhone1,", "iPhone2,", "iPhone3,", "iPhone4,", "iPhone5,",
@@ -240,11 +242,8 @@ public enum TheseusCapability {
             "iPhone11,8"
         ]
 
-        for prefix in unsupportedPrefixes {
-            if identifier.hasPrefix(prefix.replacingOccurrences(of: ",", with: "")) ||
-               identifier.contains(prefix.dropLast()) {
-                return true
-            }
+        if unsupportedPrefixes.contains(where: { identifier.hasPrefix($0) }) {
+            return true
         }
 
         let unsupportedModels = [
@@ -286,10 +285,12 @@ public final class TheseusEnvironment {
 
     public private(set) var increaseContrastEnabled: Bool = false
 
+    @available(*, deprecated, message: "Unused; use TheseusSettings.shared.areBlurEffectsEnabled.")
     public var shouldUseBlur: Bool {
         !reduceTransparencyEnabled
     }
 
+    @available(*, deprecated, message: "Unused; use TheseusSettings.shared.areMorphAnimationsEnabled.")
     public var shouldUseSpringAnimations: Bool {
         !reduceMotionEnabled
     }
@@ -385,10 +386,17 @@ public final class TheseusEnvironment {
     }
 
     private func postStateChange() {
-        NotificationCenter.default.post(
-            name: Self.stateDidChangeNotification,
-            object: self
-        )
+        let post = {
+            NotificationCenter.default.post(
+                name: Self.stateDidChangeNotification,
+                object: self
+            )
+        }
+        if Thread.isMainThread {
+            post()
+        } else {
+            DispatchQueue.main.async(execute: post)
+        }
     }
 }
 

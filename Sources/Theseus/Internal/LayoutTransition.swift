@@ -29,7 +29,6 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a view's frame with the transition
     public func updateFrame(view: UIView, frame: CGRect, completion: ((Bool) -> Void)? = nil) {
         switch self {
         case .immediate:
@@ -43,7 +42,6 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a layer's frame with the transition
     public func updateFrame(layer: CALayer, frame: CGRect, completion: ((Bool) -> Void)? = nil) {
         switch self {
         case .immediate:
@@ -59,7 +57,6 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a view's alpha with the transition
     public func updateAlpha(view: UIView, alpha: CGFloat, completion: ((Bool) -> Void)? = nil) {
         switch self {
         case .immediate:
@@ -73,7 +70,6 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a layer's alpha with the transition
     public func updateAlpha(layer: CALayer, alpha: CGFloat, completion: ((Bool) -> Void)? = nil) {
         switch self {
         case .immediate:
@@ -88,7 +84,6 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a layer's transform scale with the transition
     public func updateTransformScale(layer: CALayer, scale: CGPoint, completion: ((Bool) -> Void)? = nil) {
         let transform = CATransform3DMakeScale(scale.x, scale.y, 1.0)
 
@@ -105,7 +100,7 @@ public enum LayoutTransition {
         }
     }
 
-    /// Update a node (ASDisplayNode-like) frame with the transition
+    /// `node` is any object exposing a `view` through KVC (ASDisplayNode-like).
     public func updateFrame(node: AnyObject, frame: CGRect, completion: ((Bool) -> Void)? = nil) {
         if let view = (node as? NSObject)?.value(forKey: "view") as? UIView {
             updateFrame(view: view, frame: frame, completion: completion)
@@ -143,6 +138,8 @@ public enum LayoutTransition {
         }
     }
 
+    private static let animationTokenKey = "theseusLayoutTransitionToken"
+
     private func performLayerAnimation(
         layer: CALayer,
         keyPath: String,
@@ -159,13 +156,21 @@ public enum LayoutTransition {
         animation.fillMode = .forwards
         animation.isRemovedOnCompletion = false
 
+        // Tag the animation so the completion removes only this one; a newer transition on
+        // the same key must not be snapped to its end. KVC tag, not identity: CALayer copies on add.
+        let token = UUID().uuidString
+        animation.setValue(token, forKey: Self.animationTokenKey)
+
         CATransaction.begin()
-        CATransaction.setCompletionBlock {
-            layer.removeAnimation(forKey: keyPath)
+        CATransaction.setCompletionBlock { [weak layer] in
+            if let layer = layer,
+               let current = layer.animation(forKey: keyPath),
+               (current.value(forKey: Self.animationTokenKey) as? String) == token {
+                layer.removeAnimation(forKey: keyPath)
+            }
             completion?(true)
         }
 
-        // Set the final value
         CATransaction.setDisableActions(true)
         layer.setValue(toValue, forKeyPath: keyPath)
 

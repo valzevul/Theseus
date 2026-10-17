@@ -7,6 +7,7 @@ public struct TheseusStretchConfiguration {
     public var tension: CGFloat = 0.18
     public var friction: CGFloat = 0.88
     public var squishFactor: CGFloat = 0.55
+    @available(*, deprecated, message: "Unimplemented; the spring integrates toward the raw target in fixed 1/60 s steps. Tune tension and friction instead.")
     public var smoothing: CGFloat = 0.45
     public var stretchLimit: CGFloat = 0.45
 
@@ -25,10 +26,16 @@ public final class TheseusStretchAnimator {
     public private(set) var isActive: Bool = false
 
     private var targetStretch: CGPoint = CGPoint(x: 1.0, y: 1.0)
-    private var smoothedTarget: CGPoint = CGPoint(x: 1.0, y: 1.0)
     private var internalVelocity: CGPoint = .zero
     private var displayLink: DisplayLinkDriver.Link?
     private var interactionActive: Bool = false
+
+    // Integrate in fixed 60 Hz steps: tension and friction are per-step values, so
+    // one step per callback would tie the spring's speed to the display rate.
+    private static let fixedTimestep: CFTimeInterval = 1.0 / 60.0
+    private static let maxAccumulatedTime: CFTimeInterval = 0.25
+    private var lastTickTimestamp: CFTimeInterval?
+    private var timeAccumulator: CFTimeInterval = 0
 
     public init(configuration: TheseusStretchConfiguration = .init()) {
         self.configuration = configuration
@@ -45,13 +52,14 @@ public final class TheseusStretchAnimator {
 
         interactionActive = true
 
-        smoothedTarget = currentStretch
         internalVelocity = .zero
+        lastTickTimestamp = nil
+        timeAccumulator = 0
 
         guard displayLink == nil else { return }
 
-        displayLink = DisplayLinkDriver.shared.add(framesPerSecond: .fps(60)) { [weak self] _ in
-            self?.tick()
+        displayLink = DisplayLinkDriver.shared.add(framesPerSecond: .fps(60)) { [weak self] timestamp in
+            self?.tick(timestamp)
         }
         displayLink?.isPaused = false
         isActive = true
@@ -79,7 +87,6 @@ public final class TheseusStretchAnimator {
     public func resetToNeutral() {
         targetStretch = CGPoint(x: 1.0, y: 1.0)
         currentStretch = CGPoint(x: 1.0, y: 1.0)
-        smoothedTarget = CGPoint(x: 1.0, y: 1.0)
         internalVelocity = .zero
         stretchDidChange?(currentStretch)
     }
@@ -110,7 +117,35 @@ public final class TheseusStretchAnimator {
         targetStretch = CGPoint(x: stretchX, y: stretchY)
     }
 
-    private func tick() {
+    private func tick(_ timestamp: CFTimeInterval) {
+        let elapsed: CFTimeInterval
+        if let last = lastTickTimestamp {
+            elapsed = max(timestamp - last, 0)
+        } else {
+            elapsed = Self.fixedTimestep
+        }
+        lastTickTimestamp = timestamp
+
+        // Cap so a long suspension does not burst catch-up steps.
+        timeAccumulator = min(timeAccumulator + elapsed, Self.maxAccumulatedTime)
+
+        var didStep = false
+        while timeAccumulator >= Self.fixedTimestep {
+            timeAccumulator -= Self.fixedTimestep
+            stepSpring()
+            didStep = true
+        }
+
+        guard didStep else { return }
+
+        stretchDidChange?(currentStretch)
+
+        if !interactionActive && hasSettled() {
+            completeAnimation()
+        }
+    }
+
+    private func stepSpring() {
         let stiffness = configuration.tension
         let damping = configuration.friction
 
@@ -125,14 +160,6 @@ public final class TheseusStretchAnimator {
         internalVelocity.y += springForceY
         internalVelocity.y *= damping
         currentStretch.y += internalVelocity.y
-
-        smoothedTarget = targetStretch
-
-        stretchDidChange?(currentStretch)
-
-        if !interactionActive && hasSettled() {
-            completeAnimation()
-        }
     }
 
     private func hasSettled() -> Bool {
@@ -150,8 +177,9 @@ public final class TheseusStretchAnimator {
 
     private func completeAnimation() {
         currentStretch = CGPoint(x: 1.0, y: 1.0)
-        smoothedTarget = CGPoint(x: 1.0, y: 1.0)
         internalVelocity = .zero
+        lastTickTimestamp = nil
+        timeAccumulator = 0
         stretchDidChange?(currentStretch)
 
         displayLink?.isPaused = true

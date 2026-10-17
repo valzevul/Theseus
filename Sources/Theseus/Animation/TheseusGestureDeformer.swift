@@ -43,7 +43,6 @@ public final class TheseusGestureDeformer {
         animatorConfig.tension = morphConfig.tension
         animatorConfig.friction = morphConfig.friction
         animatorConfig.squishFactor = morphConfig.squish
-        animatorConfig.smoothing = morphConfig.smoothing
 
         let animator = TheseusStretchAnimator(configuration: animatorConfig)
         animator.stretchDidChange = { [weak self] stretch in

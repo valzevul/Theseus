@@ -1,19 +1,16 @@
 import UIKit
 import QuartzCore
 
-/// A shared display link driver that allows multiple clients to subscribe to frame callbacks
-/// without creating multiple CADisplayLink instances.
+/// One shared `CADisplayLink` for many subscribers: it runs at the fastest rate requested
+/// and delivers each link at its own cadence. Links are held weakly; keep the `Link` from `add`.
 public final class DisplayLinkDriver {
 
-    /// Singleton instance
     public static let shared = DisplayLinkDriver()
 
-    /// Frame rate options
     public enum FramesPerSecond {
         case fps(Int)
         case max
 
-        /// Get preferred frames per second value
         var preferredFPS: Int {
             switch self {
             case .fps(let fps):
@@ -24,32 +21,41 @@ public final class DisplayLinkDriver {
         }
     }
 
-    /// A link representing a subscription to display link updates
+    /// Delivery order within one tick: animation links run before render links.
+    public enum CallbackPriority: Int {
+        case animation = 0
+        case render = 100
+    }
+
+    /// A subscription to the driver; releasing it unsubscribes.
     public final class Link {
         fileprivate let id: UUID
         fileprivate weak var driver: DisplayLinkDriver?
         fileprivate let callback: (CFTimeInterval) -> Void
+        fileprivate var lastDeliveryTimestamp: CFTimeInterval?
+        fileprivate var priority: CallbackPriority = .animation
+        fileprivate var sequence: Int = 0
 
-        /// Whether the link is paused
         public var isPaused: Bool {
             get { _isPaused }
             set {
                 _isPaused = newValue
-                driver?.updateDisplayLinkState()
+                if !newValue {
+                    lastDeliveryTimestamp = nil
+                }
+                driver?.linkStateDidChange()
             }
         }
         private var _isPaused: Bool = false
 
-        /// Preferred frames per second (updates the shared display link)
-        /// Note: This affects all links using the shared display link
         public var preferredFramesPerSecond: Int {
             get { _preferredFramesPerSecond }
             set {
                 _preferredFramesPerSecond = newValue
-                driver?.updateFrameRate(newValue)
+                driver?.linkStateDidChange()
             }
         }
-        private var _preferredFramesPerSecond: Int = 60
+        fileprivate var _preferredFramesPerSecond: Int = 60
 
         fileprivate init(id: UUID, driver: DisplayLinkDriver, callback: @escaping (CFTimeInterval) -> Void) {
             self.id = id
@@ -61,25 +67,31 @@ public final class DisplayLinkDriver {
             invalidate()
         }
 
-        /// Invalidate this link and remove it from the driver
         public func invalidate() {
             driver?.removeLink(self)
         }
     }
 
+    /// Weak so a dropped `Link` unsubscribes through its `deinit`.
+    private final class WeakLink {
+        weak var link: Link?
+        init(_ link: Link) { self.link = link }
+    }
+
     private var displayLink: CADisplayLink?
-    private var links: [UUID: Link] = [:]
-    private let lock = NSLock()
+    private var links: [UUID: WeakLink] = [:]
+    /// Recursive: dropping the last reference to a `Link` under this lock
+    /// re-enters `removeLink` from its `deinit`.
+    private let lock = NSRecursiveLock()
+    private var currentFrameRate: Int = 0
+    private var nextSequence: Int = 0
 
     private init() {}
 
-    /// Add a callback to be invoked on each frame
-    /// - Parameters:
-    ///   - framesPerSecond: Target frame rate
-    ///   - callback: Callback invoked with timestamp on each frame
-    /// - Returns: A Link object that can be used to pause/invalidate the subscription
+    /// Subscribes `callback` at `framesPerSecond`; the caller must keep the returned `Link`.
     public func add(
         framesPerSecond: FramesPerSecond = .max,
+        priority: CallbackPriority = .animation,
         _ callback: @escaping (CFTimeInterval) -> Void
     ) -> Link {
         lock.lock()
@@ -87,10 +99,14 @@ public final class DisplayLinkDriver {
 
         let id = UUID()
         let link = Link(id: id, driver: self, callback: callback)
-        links[id] = link
+        link._preferredFramesPerSecond = framesPerSecond.preferredFPS
+        link.priority = priority
+        nextSequence += 1
+        link.sequence = nextSequence
+        links[id] = WeakLink(link)
 
-        ensureDisplayLinkExists(framesPerSecond: framesPerSecond)
-        updateDisplayLinkState()
+        ensureDisplayLinkExists()
+        refreshRateAndStateLocked()
 
         return link
     }
@@ -100,57 +116,87 @@ public final class DisplayLinkDriver {
         defer { lock.unlock() }
 
         links.removeValue(forKey: link.id)
-        updateDisplayLinkState()
+        refreshRateAndStateLocked()
     }
 
-    private func ensureDisplayLinkExists(framesPerSecond: FramesPerSecond = .max) {
+    fileprivate func linkStateDidChange() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        refreshRateAndStateLocked()
+    }
+
+    private func ensureDisplayLinkExists() {
         guard displayLink == nil else { return }
 
         let link = CADisplayLink(target: self, selector: #selector(handleDisplayLink(_:)))
-
-        // Set preferred frame rate based on iOS version
-        if #available(iOS 15.0, *) {
-            let fps = Float(framesPerSecond.preferredFPS)
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: fps, maximum: fps, preferred: fps)
-        } else {
-            // For iOS 13-14, use preferredFramesPerSecond (deprecated but necessary)
-            link.preferredFramesPerSecond = framesPerSecond.preferredFPS
-        }
-
         link.add(to: .main, forMode: .common)
         displayLink = link
+        currentFrameRate = 0
     }
 
-    private func updateDisplayLinkState() {
-        let hasActiveLinks = links.values.contains { !$0.isPaused }
-        displayLink?.isPaused = !hasActiveLinks
+    /// Must be called with the lock held.
+    private func liveLinksLocked() -> [Link] {
+        var live: [Link] = []
+        live.reserveCapacity(links.count)
+        for (id, box) in links {
+            if let link = box.link {
+                live.append(link)
+            } else {
+                links.removeValue(forKey: id)
+            }
+        }
+        return live
+    }
 
-        if links.isEmpty {
+    /// Must be called with the lock held.
+    private func refreshRateAndStateLocked() {
+        let live = liveLinksLocked()
+
+        if live.isEmpty {
             displayLink?.invalidate()
             displayLink = nil
+            currentFrameRate = 0
+            return
         }
-    }
 
-    fileprivate func updateFrameRate(_ fps: Int) {
-        guard let link = displayLink else { return }
+        let activeLinks = live.filter { !$0.isPaused }
+        displayLink?.isPaused = activeLinks.isEmpty
 
-        if #available(iOS 15.0, *) {
-            let fpsFloat = Float(fps)
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: fpsFloat, maximum: fpsFloat, preferred: fpsFloat)
-        } else {
-            link.preferredFramesPerSecond = fps
+        let maxFPS = activeLinks.map { $0._preferredFramesPerSecond }.max() ?? 60
+        if maxFPS != currentFrameRate, let displayLink = displayLink {
+            currentFrameRate = maxFPS
+            if #available(iOS 15.0, *) {
+                let fps = Float(maxFPS)
+                displayLink.preferredFrameRateRange = CAFrameRateRange(minimum: fps, maximum: fps, preferred: fps)
+            } else {
+                displayLink.preferredFramesPerSecond = maxFPS
+            }
         }
     }
 
     @objc private func handleDisplayLink(_ displayLink: CADisplayLink) {
-        // Lock to safely copy links array, then unlock before iterating.
-        // This prevents deadlock if a callback modifies the links dictionary.
+        // Unlock before iterating: a callback may add or remove links.
         lock.lock()
-        let activeLinks = links.values.filter { !$0.isPaused }
+        let activeLinks = liveLinksLocked()
+            .filter { !$0.isPaused }
+            .sorted {
+                ($0.priority.rawValue, $0.sequence) < ($1.priority.rawValue, $1.sequence)
+            }
         lock.unlock()
 
         let timestamp = displayLink.timestamp
+        // Half a frame of slack so jitter never starves a subscriber at the display rate.
+        let slack = displayLink.duration * 0.5
+
         for link in activeLinks {
+            let fps = max(link._preferredFramesPerSecond, 1)
+            let interval = 1.0 / CFTimeInterval(fps)
+            if let last = link.lastDeliveryTimestamp,
+               timestamp - last < interval - slack {
+                continue
+            }
+            link.lastDeliveryTimestamp = timestamp
             link.callback(timestamp)
         }
     }
