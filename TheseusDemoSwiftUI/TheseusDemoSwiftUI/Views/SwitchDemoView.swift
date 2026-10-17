@@ -18,8 +18,8 @@ struct SwitchDemoView: View {
         .systemOrange
     ]
 
-    private let offColors: [UIColor] = [
-        UIColor(white: 0.878, alpha: 1.0),
+    private let offColors: [UIColor?] = [
+        nil,
         UIColor(red: 1.0, green: 0.8, blue: 0.8, alpha: 1.0),
         UIColor(red: 1.0, green: 0.85, blue: 0.9, alpha: 1.0),
         UIColor(red: 0.85, green: 0.78, blue: 0.72, alpha: 1.0)
@@ -34,7 +34,12 @@ struct SwitchDemoView: View {
 
     var body: some View {
         ZStack {
-            GradientBackground(isDarkMode: isDarkMode)
+            if let pattern = UserDefaults.standard.string(forKey: "rigPattern"),
+               pattern.hasPrefix("flat:"), let flat = flatColor(hex: String(pattern.dropFirst(5))) {
+                flat.ignoresSafeArea()
+            } else {
+                GradientBackground(isDarkMode: isDarkMode)
+            }
 
             VStack(spacing: 50) {
                 // Native Switch
@@ -60,6 +65,7 @@ struct SwitchDemoView: View {
                         thumbTintColor: thumbColors[thumbColorIndex]
                     )
                     .frame(width: 63, height: 28)
+                    .offset(x: 2)
                 }
                 .frame(width: 280)
             }
@@ -107,7 +113,7 @@ struct SwitchSettingsSheet: View {
 
                 Section("Off Color") {
                     Picker("Off Color", selection: $offColorIndex) {
-                        Text("Gray").tag(0)
+                        Text("Default").tag(0)
                         Text("Red").tag(1)
                         Text("Pink").tag(2)
                         Text("Brown").tag(3)

@@ -54,7 +54,6 @@ class ViewDemoViewController: UIViewController {
         static let cornerRadius: Float = 40.0
         static let refractionFactor: Float = 1.8
         static let fresnelFactor: Float = 1.4
-        static let glareAngle: Float = 135.0
         static let tintColorIndex = 0
         static let continuousUpdate = false
 
@@ -71,7 +70,6 @@ class ViewDemoViewController: UIViewController {
     private var currentCornerRadius = Defaults.cornerRadius
     private var currentRefractionFactor = Defaults.refractionFactor
     private var currentFresnelFactor = Defaults.fresnelFactor
-    private var currentGlareAngle = Defaults.glareAngle
     private var currentTintColorIndex = Defaults.tintColorIndex
     private var currentContinuousUpdate = Defaults.continuousUpdate
 
@@ -177,7 +175,6 @@ class ViewDemoViewController: UIViewController {
             cornerRadius: currentCornerRadius,
             refractionFactor: currentRefractionFactor,
             fresnelFactor: currentFresnelFactor,
-            glareAngle: currentGlareAngle,
             tintColorIndex: currentTintColorIndex,
             continuousUpdate: currentContinuousUpdate
         )
@@ -198,7 +195,6 @@ class ViewDemoViewController: UIViewController {
         currentCornerRadius = Defaults.cornerRadius
         currentRefractionFactor = Defaults.refractionFactor
         currentFresnelFactor = Defaults.fresnelFactor
-        currentGlareAngle = Defaults.glareAngle
         currentTintColorIndex = Defaults.tintColorIndex
         currentContinuousUpdate = Defaults.continuousUpdate
 
@@ -210,7 +206,6 @@ class ViewDemoViewController: UIViewController {
         theseusView.shape.cornerRadius = CGFloat(currentCornerRadius)
         theseusView.refraction.intensity = CGFloat(currentRefractionFactor)
         theseusView.edgeEffects.rimGlow = CGFloat(currentFresnelFactor)
-        theseusView.edgeEffects.lightAngle = CGFloat(currentGlareAngle) * .pi / 180
         theseusView.theme.tintColor = Defaults.tintColors[currentTintColorIndex]
         theseusView.continuousUpdate = currentContinuousUpdate
 
@@ -226,7 +221,8 @@ class ViewDemoViewController: UIViewController {
         config.blur.radius = CGFloat(Defaults.blurRadius)
         config.shape.cornerRadius = lensSize / 2  // Perfect circle
         config.refraction.intensity = CGFloat(Defaults.refractionFactor)
-        config.shape.padding = CGPoint(x: 15, y: 15)
+        // Covers the ring's outward reach at this index (~34 pt).
+        config.shape.padding = CGPoint(x: 34, y: 34)
         config.theme.tintColor = .clear  // Transparent liquid glass
         // Clear specular colors to prevent white edge artifacts
         config.edgeEffects.nearColor = .clear
@@ -409,7 +405,8 @@ class ViewDemoViewController: UIViewController {
             balloonConfig.blur.radius = 10  // More blur for dramatic refraction
             balloonConfig.refraction.intensity = 1.6  // More dramatic refraction
             balloonConfig.theme.tintColor = .clear  // Transparent liquid glass
-            balloonConfig.shape.padding = CGPoint(x: 10, y: 10)
+            // Covers the ring's outward reach at this index (~28 pt).
+            balloonConfig.shape.padding = CGPoint(x: 28, y: 28)
             // Clear specular colors to prevent white edge artifacts
             balloonConfig.edgeEffects.nearColor = .clear
             balloonConfig.edgeEffects.farColor = .clear
@@ -566,7 +563,7 @@ class ViewDemoViewController: UIViewController {
         let handler = TheseusGestureDeformer(targetView: balloon)
 
         handler.positionProvider = { [weak self] translation, currentCenter, bounds in
-            guard let self = self else { return nil }
+            guard self != nil else { return nil }
 
             var newCenter = CGPoint(
                 x: currentCenter.x + translation.x,
@@ -627,12 +624,11 @@ class ViewDemoViewController: UIViewController {
 // MARK: - Settings Delegate
 
 extension ViewDemoViewController: GlassViewSettingsDelegate {
-    func settingsDidChange(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, glareAngle: Float, tintColorIndex: Int, continuousUpdate: Bool) {
+    func settingsDidChange(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, tintColorIndex: Int, continuousUpdate: Bool) {
         currentBlurRadius = blurRadius
         currentCornerRadius = cornerRadius
         currentRefractionFactor = refractionFactor
         currentFresnelFactor = fresnelFactor
-        currentGlareAngle = glareAngle
         currentTintColorIndex = tintColorIndex
         currentContinuousUpdate = continuousUpdate
         applySettings()
@@ -646,7 +642,7 @@ extension ViewDemoViewController: GlassViewSettingsDelegate {
 // MARK: - Settings View Controller
 
 protocol GlassViewSettingsDelegate: AnyObject {
-    func settingsDidChange(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, glareAngle: Float, tintColorIndex: Int, continuousUpdate: Bool)
+    func settingsDidChange(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, tintColorIndex: Int, continuousUpdate: Bool)
     func settingsDidReset()
 }
 
@@ -662,8 +658,6 @@ class GlassViewSettingsViewController: UIViewController {
     private let refractionValueLabel = UILabel()
     private let fresnelSlider = UISlider()
     private let fresnelValueLabel = UILabel()
-    private let glareAngleSlider = UISlider()
-    private let glareAngleValueLabel = UILabel()
     private let tintSegment = UISegmentedControl(items: ["None", "Blue", "Pink", "Gold"])
     private let continuousToggle = UISwitch()
 
@@ -671,16 +665,14 @@ class GlassViewSettingsViewController: UIViewController {
     private var initialCornerRadius: Float
     private var initialRefractionFactor: Float
     private var initialFresnelFactor: Float
-    private var initialGlareAngle: Float
     private var initialTintColorIndex: Int
     private var initialContinuousUpdate: Bool
 
-    init(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, glareAngle: Float, tintColorIndex: Int, continuousUpdate: Bool) {
+    init(blurRadius: Float, cornerRadius: Float, refractionFactor: Float, fresnelFactor: Float, tintColorIndex: Int, continuousUpdate: Bool) {
         self.initialBlurRadius = blurRadius
         self.initialCornerRadius = cornerRadius
         self.initialRefractionFactor = refractionFactor
         self.initialFresnelFactor = fresnelFactor
-        self.initialGlareAngle = glareAngle
         self.initialTintColorIndex = tintColorIndex
         self.initialContinuousUpdate = continuousUpdate
         super.init(nibName: nil, bundle: nil)
@@ -750,14 +742,6 @@ class GlassViewSettingsViewController: UIViewController {
         fresnelSlider.value = initialFresnelFactor
         fresnelSlider.addTarget(self, action: #selector(fresnelChanged), for: .valueChanged)
         contentStack.addArrangedSubview(createSliderRow(label: "Fresnel Factor", valueLabel: fresnelValueLabel, slider: fresnelSlider))
-
-        // Glare Angle
-        glareAngleValueLabel.text = String(format: "%.0f", initialGlareAngle)
-        glareAngleSlider.minimumValue = 0
-        glareAngleSlider.maximumValue = 360
-        glareAngleSlider.value = initialGlareAngle
-        glareAngleSlider.addTarget(self, action: #selector(glareAngleChanged), for: .valueChanged)
-        contentStack.addArrangedSubview(createSliderRow(label: "Glare Angle", valueLabel: glareAngleValueLabel, slider: glareAngleSlider))
 
         // Tint Color
         let tintLabel = createLabel("Tint Color")
@@ -848,11 +832,6 @@ class GlassViewSettingsViewController: UIViewController {
         notifyDelegate()
     }
 
-    @objc private func glareAngleChanged() {
-        glareAngleValueLabel.text = String(format: "%.0f", glareAngleSlider.value)
-        notifyDelegate()
-    }
-
     @objc private func settingsChanged() {
         notifyDelegate()
     }
@@ -863,7 +842,6 @@ class GlassViewSettingsViewController: UIViewController {
             cornerRadius: cornerRadiusSlider.value,
             refractionFactor: refractionSlider.value,
             fresnelFactor: fresnelSlider.value,
-            glareAngle: glareAngleSlider.value,
             tintColorIndex: tintSegment.selectedSegmentIndex,
             continuousUpdate: continuousToggle.isOn
         )
@@ -878,8 +856,6 @@ class GlassViewSettingsViewController: UIViewController {
         refractionValueLabel.text = "1.42"
         fresnelSlider.value = 1.0
         fresnelValueLabel.text = "1.0"
-        glareAngleSlider.value = 45.0
-        glareAngleValueLabel.text = "45"
         tintSegment.selectedSegmentIndex = 0
         continuousToggle.isOn = false
 

@@ -4,15 +4,44 @@ import UIKit
 import IOSurface
 import CoreVideo
 
-/// Result of a background capture operation
 struct CaptureResult {
     let texture: MTLTexture
     let surface: IOSurface
+    let meanColor: CaptureColor
 }
 
-/// Pool for reusing IOSurface objects with automatic lifecycle management
+struct CaptureColor: Equatable {
+    var red: CGFloat
+    var green: CGFloat
+    var blue: CGFloat
+
+    var luminance: CGFloat { 0.2126 * red + 0.7152 * green + 0.0722 * blue }
+
+    static func grey(_ value: CGFloat) -> CaptureColor {
+        CaptureColor(red: value, green: value, blue: value)
+    }
+}
+
+enum CaptureStatistics {
+    static func meanColor(of image: CGImage) -> CaptureColor {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(
+            data: &pixel,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return .grey(0.5) }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return CaptureColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255, blue: CGFloat(pixel[2]) / 255)
+    }
+}
+
 private final class SurfacePool {
-    private var cache: [SurfaceDimensions: SurfaceEntry] = [:]
+    private var cache: [SurfaceDimensions: [IOSurface]] = [:]
     private let lock = NSLock()
     private let maxSurfacesPerSize = 5
 
@@ -21,27 +50,19 @@ private final class SurfacePool {
         let height: Int
     }
 
-    struct SurfaceEntry {
-        var available: [IOSurface]
-        var inUse: Int
-    }
-
-    /// Request a surface of the given dimensions, creating if needed
     func requestSurface(dimensions: SurfaceDimensions) -> IOSurface? {
         lock.lock()
         defer { lock.unlock() }
 
-        if var entry = cache[dimensions], !entry.available.isEmpty {
-            let surface = entry.available.removeLast()
-            entry.inUse += 1
-            cache[dimensions] = entry
+        if var available = cache[dimensions], !available.isEmpty {
+            let surface = available.removeLast()
+            cache[dimensions] = available
             return surface
         }
 
         return makeSurface(dimensions: dimensions)
     }
 
-    /// Return a surface to the cache for reuse
     func returnSurface(_ surface: IOSurface) {
         lock.lock()
         defer { lock.unlock() }
@@ -51,19 +72,13 @@ private final class SurfacePool {
             height: IOSurfaceGetHeight(surface)
         )
 
-        var entry = cache[dims] ?? SurfaceEntry(available: [], inUse: 0)
-
-        // Only keep if under limit
-        guard entry.available.count < maxSurfacesPerSize else {
+        guard (cache[dims]?.count ?? 0) < maxSurfacesPerSize else {
             return
         }
 
-        entry.available.append(surface)
-        if entry.inUse > 0 { entry.inUse -= 1 }
-        cache[dims] = entry
+        cache[dims, default: []].append(surface)
     }
 
-    /// Clear all cached surfaces
     func clearCache() {
         lock.lock()
         defer { lock.unlock() }
@@ -71,11 +86,9 @@ private final class SurfacePool {
     }
 
     private func makeSurface(dimensions: SurfaceDimensions) -> IOSurface? {
-        // Metal textures require 16-byte row alignment for optimal performance
+        // Metal wants 16-byte row alignment
         let rowAlignment = 16
-        // BGRA format: 4 bytes per pixel (8 bits each for B, G, R, A)
         let bytesPerPixel = 4
-        // Round up to next multiple of rowAlignment
         let bytesPerRow = ((dimensions.width * bytesPerPixel) + rowAlignment - 1) & ~(rowAlignment - 1)
 
         let props: [IOSurfacePropertyKey: Any] = [
@@ -90,7 +103,6 @@ private final class SurfacePool {
     }
 }
 
-/// Captures view layer content using IOSurface for efficient rendering
 final class ViewLayerCapture {
 
     private let device: MTLDevice
@@ -110,24 +122,26 @@ final class ViewLayerCapture {
         scale: CGFloat = 1.0,
         excludedViews: [UIView] = []
     ) -> CaptureResult? {
-        // Temporarily hide excluded views
         let previousVisibility = excludedViews.map { $0.isHidden }
         excludedViews.forEach { $0.isHidden = true }
 
+        // Must follow the exclusion hiding above so excluded subtrees are skipped.
+        let compensation = CaptureCompensation.begin(in: sourceView)
+
         defer {
+            CaptureCompensation.end(compensation)
             for (view, wasHidden) in zip(excludedViews, previousVisibility) {
                 view.isHidden = wasHidden
             }
         }
 
-        // Calculate pixel dimensions
         let screenScale = sourceView.window?.screen.scale ?? UIScreen.main.scale
         let renderScale = screenScale * scale
 
         guard region.width > 0 && region.height > 0 else { return nil }
 
-        let pixelWidth = Int(ceil(region.width * renderScale))
-        let pixelHeight = Int(ceil(region.height * renderScale))
+        let pixelWidth = Int(ceil(region.width * renderScale - 0.001))
+        let pixelHeight = Int(ceil(region.height * renderScale - 0.001))
 
         guard pixelWidth > 0 && pixelHeight > 0 else { return nil }
 
@@ -136,7 +150,6 @@ final class ViewLayerCapture {
             return nil
         }
 
-        // Lock surface for CPU access
         guard IOSurfaceLock(surface, [], nil) == 0 else {
             surfacePool.returnSurface(surface)
             return nil
@@ -146,7 +159,6 @@ final class ViewLayerCapture {
             IOSurfaceUnlock(surface, [], nil)
         }
 
-        // Set up drawing context
         let bytesPerRow = IOSurfaceGetBytesPerRow(surface)
         let baseAddress = IOSurfaceGetBaseAddress(surface)
 
@@ -164,16 +176,23 @@ final class ViewLayerCapture {
             return nil
         }
 
-        // Clear and configure transform
         ctx.clear(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
         ctx.translateBy(x: 0, y: CGFloat(pixelHeight))
         ctx.scaleBy(x: renderScale, y: -renderScale)
         ctx.translateBy(x: -region.origin.x, y: -region.origin.y)
 
-        // Render source view
         sourceView.layer.render(in: ctx)
+        CaptureEdges.extend(
+            baseAddress,
+            width: pixelWidth,
+            height: pixelHeight,
+            bytesPerRow: bytesPerRow,
+            region: region,
+            visible: CaptureEdges.visibleBounds(of: sourceView),
+            scale: renderScale
+        )
+        let meanColor = ctx.makeImage().map(CaptureStatistics.meanColor(of:)) ?? .grey(0.5)
 
-        // Create Metal texture from surface
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm,
             width: pixelWidth,
@@ -192,15 +211,13 @@ final class ViewLayerCapture {
             return nil
         }
 
-        return CaptureResult(texture: texture, surface: surface)
+        return CaptureResult(texture: texture, surface: surface, meanColor: meanColor)
     }
 
-    /// Return a surface to the cache after use
     func recycleSurface(_ surface: IOSurface) {
         surfacePool.returnSurface(surface)
     }
 
-    /// Invalidate all cached resources
     func invalidate() {
         surfacePool.clearCache()
     }

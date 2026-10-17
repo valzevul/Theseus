@@ -6,6 +6,8 @@ import PackageDescription
 let package = Package(
     name: "Theseus",
     platforms: [
+        // iOS 13 is the floor: Metal is iOS 13+ in the simulator SDK slice, so
+        // a lower target does not build for the simulator.
         .iOS(.v13)
     ],
     products: [

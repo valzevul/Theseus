@@ -2,6 +2,9 @@ import SwiftUI
 import Theseus
 
 struct SettingsView: View {
+    @State private var tintSpectrum: Double = Double(TheseusSettings.shared.tintSpectrum)
+    @State private var followsSystemTint = TheseusSettings.shared.followsSystemTint
+    @State private var glassStyle = TheseusSettings.shared.glassStyle
     @State private var tierOverride: DeviceTier?
     @State private var iosVersionOverride: Int?
     @State private var policyOverride: RefractionPolicy?
@@ -30,6 +33,31 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                Toggle("Follow System Setting", isOn: followsSystemTintBinding)
+                Picker("Style", selection: glassStyleBinding) {
+                    Text("Automatic").tag(TheseusSettings.GlassStyle.automatic)
+                    Text("iOS 26").tag(TheseusSettings.GlassStyle.iOS26)
+                    Text("iOS 27").tag(TheseusSettings.GlassStyle.iOS27)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        Text("Clear")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Slider(value: tintSpectrumBinding, in: 0...1)
+                        Text("Tinted")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Text("The iOS 27 style reads this as Tint Amount; the iOS 26 style runs from Clear to Tinted. Moving the slider stops following the system setting.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            } header: {
+                Text("Liquid Glass Appearance")
+            }
+
             Section("Device Tier Override") {
                 Picker("Tier", selection: tierBinding) {
                     Text("Auto-detect").tag(-1)
@@ -52,6 +80,8 @@ struct SettingsView: View {
                     Text("iOS 16").tag(16)
                     Text("iOS 17").tag(17)
                     Text("iOS 18").tag(18)
+                    Text("iOS 26").tag(26)
+                    Text("iOS 27").tag(27)
                 }
                 .onChange(of: iosBinding.wrappedValue) { newValue in
                     settings.iosVersionOverride = newValue == -1 ? nil : newValue
@@ -120,6 +150,9 @@ struct SettingsView: View {
     }
 
     private func loadCurrentSettings() {
+        tintSpectrum = Double(settings.tintSpectrum)
+        followsSystemTint = settings.followsSystemTint
+        glassStyle = settings.glassStyle
         tierOverride = settings.tierOverride
         iosVersionOverride = settings.iosVersionOverride
         policyOverride = settings.refractionPolicyOverride
@@ -128,6 +161,38 @@ struct SettingsView: View {
         simulateLowPower = settings.simulateLowPowerMode
         simulateReduceTransparency = settings.simulateReduceTransparency
         simulateReduceMotion = settings.simulateReduceMotion
+    }
+
+    private var tintSpectrumBinding: Binding<Double> {
+        Binding(
+            get: { tintSpectrum },
+            set: { newValue in
+                tintSpectrum = newValue
+                settings.tintSpectrum = CGFloat(newValue)
+                followsSystemTint = settings.followsSystemTint
+            }
+        )
+    }
+
+    private var followsSystemTintBinding: Binding<Bool> {
+        Binding(
+            get: { followsSystemTint },
+            set: { newValue in
+                settings.followsSystemTint = newValue
+                followsSystemTint = newValue
+                tintSpectrum = Double(settings.tintSpectrum)
+            }
+        )
+    }
+
+    private var glassStyleBinding: Binding<TheseusSettings.GlassStyle> {
+        Binding(
+            get: { glassStyle },
+            set: { newValue in
+                settings.glassStyle = newValue
+                glassStyle = newValue
+            }
+        )
     }
 
     private var tierBinding: Binding<Int> {

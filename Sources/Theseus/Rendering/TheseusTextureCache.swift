@@ -1,7 +1,6 @@
 import Metal
 import Foundation
 
-/// A cache for reusing Metal textures to reduce allocation overhead
 final class TexturePool {
 
     private let device: MTLDevice
@@ -13,18 +12,18 @@ final class TexturePool {
         let width: Int
         let height: Int
         let format: MTLPixelFormat
+        let mipmapped: Bool
     }
 
     init(device: MTLDevice) {
         self.device = device
     }
 
-    /// Get a texture matching the specification, creating if needed
-    func checkout(width: Int, height: Int, format: MTLPixelFormat = .bgra8Unorm) -> MTLTexture? {
+    func checkout(width: Int, height: Int, format: MTLPixelFormat = .bgra8Unorm, mipmapped: Bool = false) -> MTLTexture? {
         lock.lock()
         defer { lock.unlock() }
 
-        let dims = TextureDimensions(width: width, height: height, format: format)
+        let dims = TextureDimensions(width: width, height: height, format: format, mipmapped: mipmapped)
 
         if var pooled = availableTextures[dims], !pooled.isEmpty {
             let texture = pooled.removeLast()
@@ -35,7 +34,6 @@ final class TexturePool {
         return createTexture(dimensions: dims)
     }
 
-    /// Return a texture to the pool for reuse
     func checkin(_ texture: MTLTexture) {
         lock.lock()
         defer { lock.unlock() }
@@ -43,7 +41,8 @@ final class TexturePool {
         let dims = TextureDimensions(
             width: texture.width,
             height: texture.height,
-            format: texture.pixelFormat
+            format: texture.pixelFormat,
+            mipmapped: texture.mipmapLevelCount > 1
         )
 
         guard (availableTextures[dims]?.count ?? 0) < maxPooledPerDimension else {
@@ -53,14 +52,12 @@ final class TexturePool {
         availableTextures[dims, default: []].append(texture)
     }
 
-    /// Clear all pooled textures
     func drain() {
         lock.lock()
         defer { lock.unlock() }
         availableTextures.removeAll()
     }
 
-    /// Trim pool to reduce memory usage
     func trimExcess() {
         lock.lock()
         defer { lock.unlock() }
@@ -72,30 +69,16 @@ final class TexturePool {
         }
     }
 
-    /// Statistics about the texture pool state
-    struct PoolStatistics {
-        let pooledCount: Int
-        let dimensionVariants: Int
-    }
-
-    var statistics: PoolStatistics {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let count = availableTextures.values.reduce(0) { $0 + $1.count }
-        return PoolStatistics(pooledCount: count, dimensionVariants: availableTextures.count)
-    }
-
     private func createTexture(dimensions dims: TextureDimensions) -> MTLTexture? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: dims.format,
             width: dims.width,
             height: dims.height,
-            mipmapped: false
+            mipmapped: dims.mipmapped
         )
 
         descriptor.storageMode = .private
-        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.usage = dims.mipmapped ? [.renderTarget, .shaderRead, .pixelFormatView] : [.renderTarget, .shaderRead]
 
         return device.makeTexture(descriptor: descriptor)
     }
